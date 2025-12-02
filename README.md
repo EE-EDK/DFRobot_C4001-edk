@@ -1,382 +1,202 @@
-# DFRobot_C4001
-- [中文版](./README_CN.md)
+# DFRobot C4001 mmWave Radar - Raspberry Pi Pico
 
-Determine whether the human body exists, and its anti-interference ability is relatively strong, and it is not easy to be affected by factors such as temperature changes, environmental light changes and environmental noise. Whether the human body is sitting, sleeping or moving, the sensor can quickly and sensitively detect its presence.
+Refactored driver for the DFRobot C4001 mmWave radar sensor optimized for Raspberry Pi Pico with enhanced reliability features.
 
-![效果图](resources/images/mmWaveLadar.jpg)
+## Features
 
-## Product Link(https://www.dfrobot.com/product-2282.html)
-    SKU：SEN0609 SEN0610
+- **Proper Debouncing**: Time-based debouncing with configurable samples
+- **UART Verification**: Multiple verification reads for reliable target detection
+- **Comprehensive Configuration**: All parameters defined with clear constants
+- **Debug Support**: Multi-level debug output (standard and verbose)
+- **Dual Mode Support**: Motion detection (Exit Mode) and speed/ranging (Speed Mode)
+- **I2C or UART**: Flexible interface selection
 
-## Table of Contents
+## Hardware Setup
 
-* [Summary](#Summary)
-* [Installation](#Installation)
-* [Methods](#Methods)
-* [Compatibility](#Compatibility)
-* [History](#History)
-* [Credits](#Credits)
+### Raspberry Pi Pico Connections
 
-## Summary
-
-Provides an Arduino library that has the following features:
-  Get whether the human body exists
-  Get some state of motion of the object
-
-## Installation
-There are two methods for using this library:<br>
-1. Open Arduino IDE, search for "DFRobot_C4001" on the status bar in Tools ->Manager Libraries and install the library.<br>
-2. Download the library file before use, paste it into \Arduino\libraries directory, then open the examples folder and run the demo in the folder.<br>
-
-## Methods
-
-```C++
-  /**
-   * @struct sSensorStatus_t
-   * @brief sensor status
-   * @note sensor status
-   */sSensorStatus_t;
-
-
-  /**
-   * @struct sPrivateData_t
-   * @brief speed mode data
-   */
-  typedef struct{
-    uint8_t number;
-    float speed;
-    float range;
-    uint32_t energy;
-  }sPrivateData_t;
-
-  /**
-   * @struct sResponseData_t
-   * @brief response data
-   */
-  typedef struct{
-    bool status;
-    float response1;
-    float response2;
-    float response3;
-  }sResponseData_t;
-
-
-  /**
-   * @struct sPwmData_t
-   * @brief config pwm data param
-   */
-  typedef struct{
-    uint8_t pwm1;
-    uint8_t pwm2;
-    uint8_t timer;
-  }sPwmData_t;
-
-  /**
-   * @struct sAllData_t
-   * @brief sensor return data
-   */
-  typedef struct{
-    uint8_t exist;
-    sSensorStatus_t sta;
-    sPrivateData_t target;
-  }sAllData_t;
-
-  /**
-   * @enum eMode_t
-   * @brief sensor work mode
-   */
-  typedef enum{
-    eExitMode  = 0x00,
-    eSpeedMode = 0x01,
-  }eMode_t;
-
-  /**
-   * @enum eSwitch_t
-   * @brief Micromotion detection switch
-   */
-  typedef enum{
-    eON  = 0x01,
-    eOFF = 0x00,
-  }eSwitch_t;
-
-  /**
-   * @enum eSetMode_t
-   * @brief Set parameters for the sensor working status
-   */
-  typedef enum{
-    eStartSen   = 0x55,
-    eStopSen    = 0x33,
-    eResetSen   = 0xCC,
-    eRecoverSen = 0xAA,
-    eSaveParams = 0x5C,
-    eChangeMode = 0x3B,
-  }eSetMode_t;
-
-  /**
-   * @fn motionDetection
-   * @brief motion Detection
-   * @return true or false
-   */
-  bool motionDetection(void);
-
-  /**
-   * @fn setSensor
-   * @brief Set the Sensor object
-   * @param mode
-   * @n  eStartSen        start collect
-   * @n  eStopSen         stop collect
-   * @n  eResetSen        reset sensor
-   * @n  eRecoverSen      recover params
-   * @n  eSaveParams      save config
-   * @n  eChangeMode      chagne mode
-   */
-  void setSensor(eSetMode_t mode);
-  
-  /**
-   * @fn setDelay
-   * @brief Set the Delay object
-   * @param trig Trigger delay, unit 0.01s, range 0~2s (0~200)
-   * @param keep Maintain the detection timeout, unit 0.5s, range 2~1500 seconds (4~3000)
-   * @return true or false
-   */
-  bool setDelay(uint8_t trig , uint16_t keep);
-
-  /**
-   * @fn getTrigDelay
-   * @brief Get the Trig Delay object
-   * @return uint8_t 
-   */
-  uint8_t getTrigDelay(void);
-
-  /**
-   * @fn getKeepTimerout
-   * @brief get keep timer out
-   * @return  uint16_t 
-   */
-  uint16_t getKeepTimerout(void);
-
-  /**
-   * @fn getTrigRange
-   * @brief Get the Trig Range object
-   * @n     The triggering distance, in cm, ranges from 2.4 to 20m (240 to 2000). 
-   * @n     The actual configuration range does not exceed the maximum and minimum detection distance.
-   * @return uint16_t 
-   */
-  uint16_t getTrigRange(void);
-
-  /**
-   * @fn getMaxRange
-   * @brief Get the Max Range object
-   * @return  uint16_t 
-   */
-  uint16_t getMaxRange(void);
-
-  /**
-   * @fn getMinRange
-   * @brief Get the Min Range object
-   * @return uint16_t 
-   */
-  uint16_t getMinRange(void);
-
-  /**
-   * @fn setDetectionRange
-   * @brief Set the Detection Range object
-   * @param min Detection range Minimum distance, unit cm, range 0.3~20m (30~2000), not exceeding max, otherwise the function is abnormal.
-   * @param max Detection range Maximum distance, unit cm, range 2.4~20m (240~2000)
-   * @param trig The trigger distance (unit: cm) ranges from 2.4 to 20m (240 to 2000). The actual configuration range does not exceed the maximum and minimum detection distance.
-   * @n          trigger distance is the distance that triggers no one to someone,
-   * @n          For example, if the maximum detection distance is 10 meters, the value of the trigger distance is 6 meters. 
-   * @n          If no one is present, it will be displayed within 6 meters. If it is only between 6-10 meters, it will not start for someone
-   * @return true or false
-   */
-  bool setDetectionRange(uint16_t min, uint16_t max);
-
-  /**
-   * @fn setTrigSensitivity
-   * @brief Set trigger sensitivity, 0~9
-   * @param sensitivity 
-   * @return true or false
-   */
-  bool setTrigSensitivity(uint8_t sensitivity);
-
-  /**
-   * @fn setKeepSensitivity
-   * @brief Set the Keep Sensitivity object，0~9
-   * @param sensitivity 
-   * @return true or false
-   */
-  bool setKeepSensitivity(uint8_t sensitivity);
-
-  /**
-   * @fn getTrigSensitivity
-   * @brief Get the Trig Sensitivity object
-   * @return uint8_t 
-   */
-  uint8_t getTrigSensitivity(void);
-
-  /**
-   * @fn getKeepSensitivity
-   * @brief Get the Keep Sensitivity object
-   * @return uint8_t 
-   */
-  uint8_t getKeepSensitivity(void);
-
-  /**
-   * @fn getStatus
-   * @brief Get the Status object
-   * @return sSensorStatus_t 
-   * @n     workStatus
-   * @n       0 stop
-   * @n       1 start
-   * @n     workMode
-   * @n       0 indicates presence detection
-   * @n       1 is speed measurement and ranging
-   * @n     initStatus
-   * @n       0 not init
-   * @n       1 init success
-   */
-  sSensorStatus_t getStatus(void);
-
-
-  /**
-   * @fn setIoPolaity
-   * @brief Set the Io Polaity object
-   * @param value
-   * @n     0：Output low level when there is a target, output high level when there is no target
-   * @n     1: Output high level when there is a target, output low level when there is no target (default)
-   * @return true or false 
-   */
-  bool setIoPolaity(uint8_t value);
-
-  /**
-   * @fn getIoPolaity
-   * @brief Get the Io Polaity object
-   * @return uint8_t The level of the signal output by the pin after the configured I/O port detects the target
-   */
-  uint8_t getIoPolaity(void);
-
-  /**
-   * @fn setPwm
-   * @brief Set the Pwm object
-   * @param pwm1 When no target is detected, the duty cycle of the output signal of the OUT pin ranges from 0 to 100
-   * @param pwm2 After the target is detected, the duty cycle of the output signal of the OUT pin ranges from 0 to 100
-   * @param timer timer The value ranges from 0 to 255, corresponding to timer x 64ms
-   * @n     For example, timer=20, it takes 20*64ms=1.28s for the duty cycle to change from pwm1 to pwm2.
-   * @return true or false 
-   */
-  bool setPwm(uint8_t pwm1 , uint8_t pwm2, uint8_t timer);
-
-  /**
-   * @fn getPwm
-   * @brief Get the Pwm object
-   * @return sPwmData_t 
-   * @retval pwm1  When no target is detected, the duty cycle of the output signal of the OUT pin ranges from 0 to 100
-   * @retval pwm2  After the target is detected, the duty cycle of the output signal of the OUT pin ranges from 0 to 100
-   * @retval timer The value ranges from 0 to 255, corresponding to timer x 64ms
-   * @n      For example, timer=20, it takes 20*64ms=1.28s for the duty cycle to change from pwm1 to pwm2.
-   */
-  sPwmData_t getPwm(void);
-
-  /**
-   * @fn setSensorMode
-   * @brief Set the Sensor Mode object
-   * @param mode 
-   * @return true or false
-   */
-  bool setSensorMode(eMode_t mode);
-
-  /**
-   * @fn getTargetNumber
-   * @brief Get the Target Number object
-   * @return uint8_t 
-   */
-  uint8_t getTargetNumber(void);
-
-  /**
-   * @fn getTargetSpeed
-   * @brief Get the Target Speed object
-   * @return float 
-   */
-  float getTargetSpeed(void);
-
-  /**
-   * @fn getTargetRange
-   * @brief Get the Target Range object
-   * @return float 
-   */
-  float getTargetRange(void);
-
-  /**
-   * @fn getTargetEnergy
-   * @brief Get the Target Energy object
-   * @return uint32_t 
-   */
-  uint32_t getTargetEnergy(void);
-
-  /**
-   * @fn setDetectThres
-   * @brief Set the Detect Thres object
-   * @param min Detection range Minimum distance, unit cm, range 0.3~20m (30~2000), not exceeding max, otherwise the function is abnormal.
-   * @param max Detection range Maximum distance, unit cm, range 2.4~20m (240~2000)
-   * @param thres Target detection threshold, dimensionless unit 0.1, range 0~6553.5 (0~65535)
-   * @return true or false 
-   */ 
-  bool setDetectThres(uint16_t min, uint16_t max, uint16_t thres);
-
-  /**
-   * @fn getTMinRange
-   * @brief get speed Min Range
-   * @return uint16_t 
-   */
-  uint16_t getTMinRange(void);
-
-  /**
-   * @fn getTMaxRange
-   * @brief get speed Max Range
-   * @return uint16_t 
-   */
-  uint16_t getTMaxRange(void);
-
-  /**
-   * @fn getThresRange
-   * @brief Get the Thres Range object
-   * @return uint16_t 
-   */
-  uint16_t getThresRange(void);
-
-  /**
-   * @fn setFrettingDetection
-   * @brief Set the Fretting Detection object
-   * @param sta 
-   */
-  void setFrettingDetection(eSwitch_t sta);
-
-  /**
-   * @fn getFrettingDetection
-   * @brief Get the Fretting Detection object
-   * @return eSwitch_t 
-   */
-  eSwitch_t getFrettingDetection(void);
-
+**UART Mode (Default):**
+```
+Pico GPIO 4 (TX) --> Sensor RX
+Pico GPIO 5 (RX) --> Sensor TX
+Pico GND         --> Sensor GND
+Pico 3.3V/5V     --> Sensor VCC
 ```
 
-## Compatibility
+**I2C Mode:**
+```
+Pico GPIO 4 (SDA) --> Sensor SDA
+Pico GPIO 5 (SCL) --> Sensor SCL
+Pico GND          --> Sensor GND
+Pico 3.3V/5V      --> Sensor VCC
+```
 
-MCU                | Work Well    |   Work Wrong    | Untested    | Remarks
------------------- | :----------: | :-------------: | :---------: | :----:
-Arduino Uno        |      √       |                 |             |
-Arduino MEGA2560   |      √       |                 |             |
-Arduino Leonardo   |      √       |                 |             |
-FireBeetle-ESP8266 |      √       |                 |             |
-FireBeetle-ESP32   |      √       |                 |             |
-FireBeetle-M0      |      √       |                 |             |
-Micro:bit          |      √       | nonsupport uart |             |
+## Configuration
 
+All configuration is done via `#define` statements at the top of `C4001_RaspberryPiPico.ino`:
 
-## History
+### Interface Selection
+```cpp
+#define USE_I2C_INTERFACE    0    // 0 = UART, 1 = I2C
+#define UART_BAUD_RATE       115200
+```
 
-- 2024/02/26 - Version 1.0.0 released.
+### Detection Parameters
+```cpp
+#define DETECTION_MIN_RANGE  30    // cm
+#define DETECTION_MAX_RANGE  1000  // cm
+#define TRIG_SENSITIVITY     1     // 0-9
+#define KEEP_SENSITIVITY     2     // 0-9
+```
 
-## Credits
+### Debouncing
+```cpp
+#define DEBOUNCE_TIME_MS     500   // Milliseconds
+#define DEBOUNCE_SAMPLES     5     // Consecutive samples
+#define UART_VERIFY_SAMPLES  3     // UART verifications
+```
 
-Written by ZhixinLiu(zhixin.liu@dfrobot.com), 2024. (Welcome to our website)
+### Debug Output
+```cpp
+#define ENABLE_DEBUG         1     // Enable/disable debug
+#define ENABLE_VERBOSE_DEBUG 1     // Extra detailed output
+```
+
+### Operating Modes
+```cpp
+#define SENSOR_MODE          eExitMode  // or eSpeedMode
+```
+
+## Operating Modes
+
+### Exit Mode (Motion Detection)
+Detects human presence and motion within configured range. Outputs:
+- Target presence (debounced)
+- PWM signal based on detection state
+
+### Speed Mode (Ranging & Velocity)
+Measures target characteristics:
+- Number of targets
+- Speed (m/s)
+- Range (meters)
+- Energy level
+
+## Debouncing Algorithm
+
+The implementation uses a multi-stage debouncing approach:
+
+1. **Time-Based**: State must be stable for `DEBOUNCE_TIME_MS`
+2. **Sample-Based**: Requires `DEBOUNCE_SAMPLES` consecutive readings
+3. **UART Verification** (UART mode only): Performs `UART_VERIFY_SAMPLES` additional reads
+
+This eliminates false triggers from:
+- Sensor noise
+- Transient detections
+- Communication errors
+
+## File Structure
+
+```
+DFRobot_C4001-edk/
+├── C4001_RaspberryPiPico.ino  # Unified example (use this!)
+├── src/
+│   ├── DFRobot_C4001.h        # Driver header
+│   └── DFRobot_C4001.cpp      # Driver implementation
+├── library.properties          # Arduino library metadata
+├── keywords.txt                # Arduino IDE syntax highlighting
+├── LICENSE                     # MIT License
+└── README.md                   # This file
+```
+
+## Quick Start
+
+1. **Install** the library in your Arduino IDE
+2. **Open** `C4001_RaspberryPiPico.ino`
+3. **Configure** the defines at the top for your setup
+4. **Connect** the hardware according to the pinout
+5. **Upload** to your Raspberry Pi Pico
+6. **Open** Serial Monitor at 115200 baud
+
+## Example Output
+
+```
+========================================
+  DFRobot C4001 mmWave Radar - Pico
+========================================
+
+Interface: UART
+UART Baud: 115200
+UART RX Pin: 5
+UART TX Pin: 4
+Sensor Mode: Exit/Motion Detection
+
+Initializing sensor...
+Sensor connected successfully!
+
+Configuring sensor parameters...
+Setting mode to Exit Mode...
+  ✓ Mode set successfully
+  ✓ Detection range set
+  ✓ Trigger sensitivity set
+
+... (configuration continues)
+
+✓ TARGET VERIFIED (UART + Debounce)
+>>> MOTION DETECTED <<<
+```
+
+## Advanced Configuration
+
+### PWM Output Configuration
+Control the duty cycle of the hardware output pin:
+```cpp
+#define PWM_NO_TARGET_DUTY   50  // 50% when no target
+#define PWM_TARGET_DUTY      0   // 0% when target present
+#define PWM_TRANSITION_TIMER 10  // Transition time
+```
+
+### Timing Parameters
+```cpp
+#define TRIG_DELAY_UNITS     100  // 1.00s trigger delay
+#define KEEP_TIMEOUT_UNITS   4    // 2.0s keep timeout
+```
+
+## Troubleshooting
+
+**"NO Deivces !" error:**
+- Check wiring connections
+- Verify power supply (3.3V or 5V)
+- For UART: Confirm baud rate is 115200
+- For I2C: Check I2C address (default 0x2A)
+
+**False triggers:**
+- Increase `DEBOUNCE_TIME_MS`
+- Increase `DEBOUNCE_SAMPLES`
+- Decrease `TRIG_SENSITIVITY`
+- Reduce `DETECTION_MAX_RANGE`
+
+**No detection:**
+- Increase `TRIG_SENSITIVITY`
+- Check `DETECTION_MIN_RANGE` and `DETECTION_MAX_RANGE`
+- Ensure target is within configured range
+
+## License
+
+MIT License - Copyright (c) 2010 DFRobot Co.Ltd
+
+## Version History
+
+- **v2.0** (2025-12-02): Refactored for Raspberry Pi Pico with enhanced debouncing
+- **v1.0** (2024-02-02): Original DFRobot release
+
+## Technical Details
+
+**Sensor**: DFRobot C4001 mmWave Radar
+**Interfaces**: I2C (0x2A/0x2B) or UART (115200 baud)
+**Detection Range**: 0.3m - 20m
+**Operating Voltage**: 3.3V or 5V
+**Communication Protocol**: AT-command (UART) or Register-based (I2C)
+
+---
+
+For issues and contributions, please refer to the repository.
