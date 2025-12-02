@@ -1,6 +1,6 @@
 /*!
  * @file C4001_RaspberryPiPico.ino
- * @brief Unified DFRobot C4001 mmWave Radar driver for Raspberry Pi Pico
+ * @brief Unified DFRobot C4001 mmWave Radar UART driver for Raspberry Pi Pico
  * @details This implementation includes:
  *          - Proper output trigger debouncing
  *          - Software UART verification
@@ -8,7 +8,7 @@
  *          - Combined motion detection and ranging
  * @copyright Copyright (c) 2010 DFRobot Co.Ltd (http://www.dfrobot.com)
  * @license The MIT License (MIT)
- * @version V2.0
+ * @version V2.1
  * @date 2025-12-02
  */
 
@@ -18,13 +18,9 @@
 // CONFIGURATION DEFINES
 // ============================================================================
 
-// Communication Interface Selection
-#define USE_I2C_INTERFACE         0    // 0 = UART, 1 = I2C
+// UART Communication Configuration
 #define UART_BAUD_RATE            115200
 #define DEBUG_BAUD_RATE           115200
-
-// I2C Configuration
-#define I2C_DEVICE_ADDRESS        DEVICE_ADDR_0  // 0x2A (default) or DEVICE_ADDR_1 (0x2B)
 
 // UART Pin Configuration for Raspberry Pi Pico
 #define UART_RX_PIN               5    // GP5 - Connect to sensor TX
@@ -100,11 +96,7 @@
 // GLOBAL OBJECTS
 // ============================================================================
 
-#if USE_I2C_INTERFACE
-  DFRobot_C4001_I2C radar(&Wire, I2C_DEVICE_ADDRESS);
-#else
-  DFRobot_C4001_UART radar(&Serial1, UART_BAUD_RATE, UART_TX_PIN, UART_RX_PIN);
-#endif
+DFRobot_C4001_UART radar(&Serial1, UART_BAUD_RATE, UART_TX_PIN, UART_RX_PIN);
 
 // ============================================================================
 // DEBOUNCING STATE MACHINE
@@ -165,21 +157,17 @@ void setup() {
   DEBUG_PRINTLN();
   DEBUG_PRINTLN(F("========================================"));
   DEBUG_PRINTLN(F("  DFRobot C4001 mmWave Radar - Pico"));
+  DEBUG_PRINTLN(F("       UART Interface Mode"));
   DEBUG_PRINTLN(F("========================================"));
   DEBUG_PRINTLN();
 
   // Print configuration
-  DEBUG_PRINT(F("Interface: "));
-  DEBUG_PRINTLN(USE_I2C_INTERFACE ? F("I2C") : F("UART"));
-
-  #if !USE_I2C_INTERFACE
-    DEBUG_PRINT(F("UART Baud: "));
-    DEBUG_PRINTLN(UART_BAUD_RATE);
-    DEBUG_PRINT(F("UART RX Pin: "));
-    DEBUG_PRINTLN(UART_RX_PIN);
-    DEBUG_PRINT(F("UART TX Pin: "));
-    DEBUG_PRINTLN(UART_TX_PIN);
-  #endif
+  DEBUG_PRINT(F("UART Baud: "));
+  DEBUG_PRINTLN(UART_BAUD_RATE);
+  DEBUG_PRINT(F("UART RX Pin: GP"));
+  DEBUG_PRINTLN(UART_RX_PIN);
+  DEBUG_PRINT(F("UART TX Pin: GP"));
+  DEBUG_PRINTLN(UART_TX_PIN);
 
   DEBUG_PRINT(F("Sensor Mode: "));
   DEBUG_PRINTLN((SENSOR_MODE == eExitMode) ? F("Exit/Motion Detection") : F("Speed/Ranging"));
@@ -224,7 +212,7 @@ void loop() {
 // ============================================================================
 
 void initializeSensor(void) {
-  DEBUG_PRINTLN(F("Initializing sensor..."));
+  DEBUG_PRINTLN(F("Initializing UART sensor..."));
 
   uint8_t attempts = 0;
   const uint8_t maxAttempts = 10;
@@ -239,6 +227,7 @@ void initializeSensor(void) {
     if (attempts >= maxAttempts) {
       DEBUG_PRINTLN(F("ERROR: Failed to connect to sensor!"));
       DEBUG_PRINTLN(F("Check wiring and power supply."));
+      DEBUG_PRINTLN(F("Verify UART TX/RX pins are correct."));
       while (1) {
         delay(1000);
       }
@@ -309,15 +298,13 @@ void configureSensorParameters(void) {
       DEBUG_PRINTLN(F("  ✗ Failed to set PWM"));
     }
 
-    // Set IO polarity (UART only)
-    #if !USE_I2C_INTERFACE
-      DEBUG_PRINTLN(F("Setting IO polarity..."));
-      if (radar.setIoPolaity(IO_POLARITY_ACTIVE_HIGH)) {
-        DEBUG_PRINTLN(F("  ✓ IO polarity set"));
-      } else {
-        DEBUG_PRINTLN(F("  ✗ Failed to set IO polarity"));
-      }
-    #endif
+    // Set IO polarity
+    DEBUG_PRINTLN(F("Setting IO polarity..."));
+    if (radar.setIoPolaity(IO_POLARITY_ACTIVE_HIGH)) {
+      DEBUG_PRINTLN(F("  ✓ IO polarity set"));
+    } else {
+      DEBUG_PRINTLN(F("  ✗ Failed to set IO polarity"));
+    }
 
   } else {
     // Configure Speed/Ranging Mode
@@ -402,25 +389,23 @@ void printSensorConfiguration(void) {
     DEBUG_PRINT(radar.getKeepTimerout() * 0.5);
     DEBUG_PRINTLN(F(" s)"));
 
-    #if !USE_I2C_INTERFACE
-      DEBUG_PRINT(F("  IO Polarity: "));
-      DEBUG_PRINTLN(radar.getIoPolaity() ? F("ACTIVE HIGH") : F("ACTIVE LOW"));
+    DEBUG_PRINT(F("  IO Polarity: "));
+    DEBUG_PRINTLN(radar.getIoPolaity() ? F("ACTIVE HIGH") : F("ACTIVE LOW"));
 
-      sPwmData_t pwmData = radar.getPwm();
-      DEBUG_PRINT(F("  PWM No Target: "));
-      DEBUG_PRINT(pwmData.pwm1);
-      DEBUG_PRINTLN(F("%"));
+    sPwmData_t pwmData = radar.getPwm();
+    DEBUG_PRINT(F("  PWM No Target: "));
+    DEBUG_PRINT(pwmData.pwm1);
+    DEBUG_PRINTLN(F("%"));
 
-      DEBUG_PRINT(F("  PWM Target: "));
-      DEBUG_PRINT(pwmData.pwm2);
-      DEBUG_PRINTLN(F("%"));
+    DEBUG_PRINT(F("  PWM Target: "));
+    DEBUG_PRINT(pwmData.pwm2);
+    DEBUG_PRINTLN(F("%"));
 
-      DEBUG_PRINT(F("  PWM Timer: "));
-      DEBUG_PRINT(pwmData.timer);
-      DEBUG_PRINT(F(" ("));
-      DEBUG_PRINT(pwmData.timer * 64);
-      DEBUG_PRINTLN(F(" ms)"));
-    #endif
+    DEBUG_PRINT(F("  PWM Timer: "));
+    DEBUG_PRINT(pwmData.timer);
+    DEBUG_PRINT(F(" ("));
+    DEBUG_PRINT(pwmData.timer * 64);
+    DEBUG_PRINTLN(F(" ms)"));
 
   } else {
     // Speed Mode Configuration
@@ -479,73 +464,54 @@ void updateTargetState(bool rawDetection) {
   if (timeInState >= DEBOUNCE_TIME_MS &&
       debounceState.consecutiveCount >= DEBOUNCE_SAMPLES) {
 
-    #if !USE_I2C_INTERFACE
-      // For UART, verify with additional data reads
-      if (debounceState.currentState == TARGET_STATE_DETECTED) {
-        if (verifyUARTData()) {
-          debounceState.uartVerifyCount++;
+    // For UART, verify with additional data reads
+    if (debounceState.currentState == TARGET_STATE_DETECTED) {
+      if (verifyUARTData()) {
+        debounceState.uartVerifyCount++;
 
-          VERBOSE_PRINT(F("  [UART VERIFY] Count: "));
-          VERBOSE_PRINT(debounceState.uartVerifyCount);
-          VERBOSE_PRINT(F("/"));
-          VERBOSE_PRINTLN(UART_VERIFY_SAMPLES);
+        VERBOSE_PRINT(F("  [UART VERIFY] Count: "));
+        VERBOSE_PRINT(debounceState.uartVerifyCount);
+        VERBOSE_PRINT(F("/"));
+        VERBOSE_PRINTLN(UART_VERIFY_SAMPLES);
 
-          if (debounceState.uartVerifyCount >= UART_VERIFY_SAMPLES) {
-            // Verified detection
-            if (!debounceState.debounced || debounceState.previousState != TARGET_STATE_DETECTED) {
-              DEBUG_PRINTLN(F("✓ TARGET VERIFIED (UART + Debounce)"));
-              debounceState.debounced = true;
-              debounceState.previousState = TARGET_STATE_DETECTED;
-            }
+        if (debounceState.uartVerifyCount >= UART_VERIFY_SAMPLES) {
+          // Verified detection
+          if (!debounceState.debounced || debounceState.previousState != TARGET_STATE_DETECTED) {
+            DEBUG_PRINTLN(F("✓ TARGET VERIFIED (UART + Debounce)"));
+            debounceState.debounced = true;
+            debounceState.previousState = TARGET_STATE_DETECTED;
           }
-        } else {
-          // Failed verification, reset
-          VERBOSE_PRINTLN(F("  [UART VERIFY] Failed, resetting"));
-          debounceState.uartVerifyCount = 0;
-          debounceState.consecutiveCount = 0;
         }
       } else {
-        // No target state
-        if (debounceState.debounced || debounceState.previousState != TARGET_STATE_NONE) {
-          DEBUG_PRINTLN(F("✓ NO TARGET (Debounced)"));
-          debounceState.debounced = false;
-          debounceState.previousState = TARGET_STATE_NONE;
-        }
+        // Failed verification, reset
+        VERBOSE_PRINTLN(F("  [UART VERIFY] Failed, resetting"));
         debounceState.uartVerifyCount = 0;
+        debounceState.consecutiveCount = 0;
       }
-    #else
-      // For I2C, no additional verification needed
-      bool newDebouncedState = (debounceState.currentState == TARGET_STATE_DETECTED);
-      if (newDebouncedState != debounceState.debounced) {
-        debounceState.debounced = newDebouncedState;
-        debounceState.previousState = debounceState.currentState;
-
-        if (newDebouncedState) {
-          DEBUG_PRINTLN(F("✓ TARGET DETECTED (Debounced)"));
-        } else {
-          DEBUG_PRINTLN(F("✓ NO TARGET (Debounced)"));
-        }
+    } else {
+      // No target state
+      if (debounceState.debounced || debounceState.previousState != TARGET_STATE_NONE) {
+        DEBUG_PRINTLN(F("✓ NO TARGET (Debounced)"));
+        debounceState.debounced = false;
+        debounceState.previousState = TARGET_STATE_NONE;
       }
-    #endif
+      debounceState.uartVerifyCount = 0;
+    }
   }
 }
 
 bool verifyUARTData(void) {
-  #if USE_I2C_INTERFACE
-    return true;  // No UART verification for I2C mode
-  #else
-    // Read motion detection again to verify
-    bool verification1 = radar.motionDetection();
-    delay(10);
-    bool verification2 = radar.motionDetection();
+  // Read motion detection again to verify
+  bool verification1 = radar.motionDetection();
+  delay(10);
+  bool verification2 = radar.motionDetection();
 
-    VERBOSE_PRINT(F("  [VERIFY] v1="));
-    VERBOSE_PRINT(verification1);
-    VERBOSE_PRINT(F(", v2="));
-    VERBOSE_PRINTLN(verification2);
+  VERBOSE_PRINT(F("  [VERIFY] v1="));
+  VERBOSE_PRINT(verification1);
+  VERBOSE_PRINT(F(", v2="));
+  VERBOSE_PRINTLN(verification2);
 
-    return (verification1 && verification2);
-  #endif
+  return (verification1 && verification2);
 }
 
 // ============================================================================
