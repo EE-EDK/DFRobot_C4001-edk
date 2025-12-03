@@ -2,7 +2,50 @@
 
 Refactored UART driver for the DFRobot C4001 mmWave radar sensor optimized for Raspberry Pi Pico with enhanced reliability features.
 
-## Features
+## 📁 Available Examples
+
+This repository includes three different implementations:
+
+| File | Purpose | Best For |
+|------|---------|----------|
+| **`C4001_PresenceDetector_Enhanced.ino`** ⭐ | Production presence detection with robustness | **RECOMMENDED for most users** |
+| `C4001_RaspberryPiPico.ino` | General-purpose sensor testing | Development/experimentation |
+| Legacy examples (removed) | - | Replaced by above |
+
+### 🎯 Which File Should I Use?
+
+- **Want reliable presence detection?** → Use `C4001_PresenceDetector_Enhanced.ino`
+- **Want to experiment with sensor features?** → Use `C4001_RaspberryPiPico.ino`
+- **Upgrading from original code?** → Read `ENHANCED_FEATURES.md`
+
+---
+
+## 🌟 Enhanced Presence Detector (RECOMMENDED)
+
+The **`C4001_PresenceDetector_Enhanced.ino`** combines the best features from production-tested code with advanced debouncing:
+
+### Key Features:
+- ✅ **Proven Configuration**: Uses tested pin assignments (RX=1, TX=0) and 9600 baud
+- ✅ **Smart Range Filtering**: 2-6 meter detection (avoids wall reflections)
+- ✅ **3-Second Latch**: Prevents flickering during movement
+- ✅ **LED Indicator**: Visual feedback with optional inversion
+- ✅ **UART Verification**: Optional extra robustness (configurable)
+- ✅ **Beautiful Output**: Box-drawing characters for status
+- ✅ **Production Ready**: Comprehensive error handling
+
+### Quick Start (Enhanced):
+```cpp
+// 1. Upload C4001_PresenceDetector_Enhanced.ino
+// 2. Wire: GP0(TX)→RX, GP1(RX)→TX, GND→GND, 5V→VCC, LED on GP18
+// 3. Open Serial Monitor at 115200 baud
+// 4. Watch for presence detection!
+```
+
+See `ENHANCED_FEATURES.md` for complete documentation and customization guide.
+
+---
+
+## Features (General-Purpose Driver)
 
 - **UART Interface Only**: Optimized for UART communication at 115200 baud
 - **Proper Debouncing**: Time-based debouncing with configurable samples
