@@ -7,9 +7,22 @@
  *          - LED indicator with optional inversion
  *          - UART verification for reliability
  *          - Comprehensive configuration via #defines
+ *
+ * @note    IMPORTANT LIMITATIONS (from sensor manual):
+ *          - Distance measurements are NOT calibrated (reference only)
+ *          - 1m transition zone exists beyond MAX_DETECTION_RANGE_M
+ *          - Sensitivity commands (setSensitivity) only work in Presence mode
+ *          - Micro-motion (setMicroMotion) only works in Speed mode
+ *          - Default baud rate varies: manual says 9600, protocol says 115200
+ *
+ * @see     Communication Protocol PDF - Section 1 (Configuration Commands)
+ * @see     Communication Protocol PDF - Section 1.7 (Micro-motion for Speed mode)
+ * @see     Sensor Manual PDF - Technical Specifications & Limitations
+ * @see     Sensor Manual PDF - Section 1.1 (Distance measurement disclaimer)
+ *
  * @author  Ethan + Claude Enhanced
- * @date    2025-12-02
- * @version 2.5
+ * @date    2025-12-03
+ * @version 2.6
  */
 
 #include "src/DFRobot_C4001.h"
@@ -32,28 +45,58 @@
 // ============================================================================
 
 #define BAUD_DEBUG              115200  // USB Serial for debugging
+
+// --- Sensor UART Baud Rate ---
+// Note: Sensor manual specifies 9600 default, but protocol document mentions 115200.
+// If communication fails, try 115200 or use setUart command to configure.
+// See Communication Protocol PDF Section 1.6 (setUart/getUart commands)
 #define BAUD_SENSOR             9600    // Sensor UART (9600 is most compatible)
+                                        // Alternative: 115200 (if 9600 fails)
+                                        // Range: 4800-115200 bps
+
 #define SERIAL_TIMEOUT_MS       3000    // Time to wait for USB serial
 
 // ============================================================================
 // DETECTION RANGE CONFIGURATION (meters)
 // ============================================================================
 
+// ⚠️ CRITICAL: Distance measurements are NOT calibrated and may have errors!
+//    The C4001 is NOT designed for precise distance measurement.
+//    Use distance values as REFERENCE ONLY, not for accurate measurements.
+//    See Sensor Manual Section 1.1 for details.
+
+// ⚠️ 1-METER TRANSITION ZONE: The sensor has a 1m transition zone beyond MAX range.
+//    Example: If MAX_DETECTION_RANGE_M = 6.0m, the sensor may still detect
+//    movement at 6-25m (requires significant movement). This is NORMAL behavior.
+//    Configure MAX range to accurately define your desired detection area.
+//    See Sensor Manual Section 1.1 (setRange) for details.
+
 // Smart range filtering to avoid false triggers
 #define MIN_DETECTION_RANGE_M   2.0     // Ignore closer objects (walls, furniture)
+                                        // Minimum: 0.6m (sensor limit)
+                                        // Recommended: 2.0m+ to avoid walls
 #define MAX_DETECTION_RANGE_M   6.0     // Maximum useful detection distance
+                                        // Maximum: 25m (sensor limit)
+                                        // Note: +1m transition zone applies
 
 // Note: Using 2.0m minimum prevents triggering on nearby walls/objects
 // Adjust based on your room size and sensor mounting
+// See Communication Protocol PDF Section 1.1 (setRange/getRange commands)
 
 // ============================================================================
 // DETECTION BEHAVIOR CONFIGURATION
 // ============================================================================
 
-// --- Sensor Sensitivity ---
+// --- Sensor Sensitivity / Threshold Factor ---
+// Note: In Speed mode, this maps to setThrFactor (Protocol Section 1.8)
+//       Library method: setDetectThres() appears to abstract this
+//       Protocol: Threshold factor (default 5) - larger value = bigger movements needed
+//       Library: Threshold (1-65535) - lower value = more sensitive
+// See Communication Protocol PDF Section 1.8 (setThrFactor/getThrFactor)
 #define DETECTION_THRESHOLD     10      // Lower = more sensitive (1-65535)
                                         // Recommended: 10-20 for presence
                                         // Higher values = fewer false positives
+                                        // Protocol equivalent: factor ~5
 
 // --- Debouncing & Stability ---
 #define STABLE_READINGS         2       // Consecutive detections required (2-5 recommended)
@@ -65,9 +108,14 @@
                                         // Prevents rapid ON/OFF cycling
                                         // Adjust: 2000-5000ms typical
 
-// --- Micro-motion Detection ---
+// --- Micro-motion Detection (Speed Mode Only) ---
+// Protocol command: setMicroMotion (Section 1.7)
+// Library method: setFrettingDetection()
+// ⚠️ This setting ONLY works in Speed/Distance measurement mode
+// See Communication Protocol PDF Section 1.7 (setMicroMotion/getMicroMotion)
 #define ENABLE_FRETTING         eON     // eON = detect small movements (recommended)
                                         // eOFF = only detect larger movements
+                                        // Only effective in Speed mode (current)
 
 // ============================================================================
 // OUTPUT & DISPLAY CONFIGURATION
@@ -92,6 +140,43 @@
 // ============================================================================
 // ADVANCED OPTIONS (Normally don't need to change)
 // ============================================================================
+
+// --- Operating Mode Selection ---
+// 0 = Presence Detection mode (uses sensitivity, latency, trigger distance)
+// 1 = Speed/Distance mode (uses threshold factor, micro-motion)
+// Note: Currently using Speed mode because Presence mode firmware has issues
+// See Communication Protocol PDF Section 2.6 (setRunApp)
+#define SENSOR_MODE             1       // 0=Presence, 1=Speed (currently must be 1)
+
+// --- Sensitivity Settings (Presence Mode Only) ---
+// ⚠️ These commands ONLY work in Presence Detection mode (SENSOR_MODE = 0)
+// See Communication Protocol PDF Section 1.3 (setSensitivity/getSensitivity)
+// Hold sensitivity: sensitivity after sensor is triggered (0-9, default 7)
+// Trigger sensitivity: ease of initial trigger (0-9, default 5)
+// Higher = more sensitive, Lower = requires larger movement
+// ⚠️ WARNING: NOT available in Speed mode - use DETECTION_THRESHOLD instead
+#define HOLD_SENSITIVITY        7       // 0-9 (default 7) - Presence mode only
+#define TRIGGER_SENSITIVITY     5       // 0-9 (default 5) - Presence mode only
+                                        // Recommended: 2-6 to avoid false alarms
+
+// --- Trigger Distance (Presence Mode Only) ---
+// ⚠️ This command ONLY works in Presence Detection mode (SENSOR_MODE = 0)
+// Defines distance to transition from "no one" to "someone"
+// Helps reduce false triggers at detection edge
+// Example: MAX=10m, TRIG=6m → only triggers when within 6m
+// See Communication Protocol PDF Section 1.2 (setTrigRange/getTrigRange)
+#define TRIGGER_RANGE_M         6.0     // 0-25m (default 6m) - Presence mode only
+
+// --- Hardware Latency (Presence Mode Only) ---
+// ⚠️ These settings ONLY work in Presence Detection mode (SENSOR_MODE = 0)
+// Note: These are HARDWARE delays in the sensor itself (separate from software latch)
+// Confirmation: delay before OUT pin goes HIGH (reduces false positives)
+// Disappearance: delay before OUT pin goes LOW (reduces missed detections)
+// See Communication Protocol PDF Section 1.4 (setLatency/getLatency)
+#define USE_HARDWARE_LATENCY    false   // Set true to use sensor's built-in latency
+#define CONFIRM_LATENCY_S       0.5     // 0-100s (default 0.050s) - Presence mode only
+#define DISAPPEAR_LATENCY_S     15.0    // 0.5-1500s (default 15s) - Presence mode only
+                                        // Recommended: 0.5s+ confirm, 15s+ disappear
 
 // Convert meters to centimeters for sensor API
 #define MIN_DETECTION_RANGE_CM  ((uint16_t)(MIN_DETECTION_RANGE_M * 100))
@@ -288,17 +373,54 @@ void configureSensor(void) {
     Serial.println(F("  (Using Speed Mode - Presence mode firmware is broken)"));
     Serial.println();
 
-    // Runtime validation of configuration (can't use #if with floats)
+    // ============ Configuration Validation ============
+    bool configErrors = false;
+
+    Serial.println(F("Validating configuration..."));
+
+    // Range validation
     if (MIN_DETECTION_RANGE_M >= MAX_DETECTION_RANGE_M) {
-        Serial.println(F("✗ CONFIG ERROR: MIN_DETECTION_RANGE_M must be < MAX_DETECTION_RANGE_M"));
+        Serial.println(F("  ✗ ERROR: MIN_DETECTION_RANGE_M must be < MAX_DETECTION_RANGE_M"));
+        configErrors = true;
+    }
+    if (MIN_DETECTION_RANGE_M < 0.6) {
+        Serial.println(F("  ⚠ Warning: MIN range < 0.6m (sensor minimum)"));
+    }
+    if (MAX_DETECTION_RANGE_M > 25.0) {
+        Serial.println(F("  ⚠ Warning: MAX range > 25m (sensor maximum)"));
+    }
+
+    // Latch validation
+    if (DETECTION_LATCH_MS < 500) {
+        Serial.println(F("  ⚠ Warning: DETECTION_LATCH_MS < 500ms may cause flickering"));
+    }
+
+    // Stable readings validation
+    if (STABLE_READINGS < 1) {
+        Serial.println(F("  ✗ ERROR: STABLE_READINGS must be >= 1"));
+        configErrors = true;
+    }
+
+    // Threshold validation
+    if (DETECTION_THRESHOLD < 1 || DETECTION_THRESHOLD > 65535) {
+        Serial.println(F("  ✗ ERROR: DETECTION_THRESHOLD must be 1-65535"));
+        configErrors = true;
+    }
+
+    // Mode validation
+    if (SENSOR_MODE != 0 && SENSOR_MODE != 1) {
+        Serial.println(F("  ✗ ERROR: SENSOR_MODE must be 0 (Presence) or 1 (Speed)"));
+        configErrors = true;
+    }
+
+    if (configErrors) {
+        Serial.println();
+        Serial.println(F("✗ Configuration errors detected! Fix defines and restart."));
         while (1) { delay(1000); }
     }
-    if (MIN_DETECTION_RANGE_M < 0.3) {
-        Serial.println(F("⚠ Warning: MIN range < 0.3m may cause issues"));
-    }
-    if (MAX_DETECTION_RANGE_M > 20.0) {
-        Serial.println(F("⚠ Warning: MAX range > 20m exceeds sensor capability"));
-    }
+
+    Serial.println(F("  ✓ Configuration validation passed"));
+    Serial.println();
 
     // Step 1: Set to Speed/Range mode
     Serial.print(F("  [1/4] Setting sensor mode... "));
@@ -604,6 +726,111 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
         Serial.println(F("[CLEAR]"));
     }
 }
+
+// ============================================================================
+// TROUBLESHOOTING GUIDE
+// ============================================================================
+/*
+ * PROBLEM: Sensor not detecting
+ * SOLUTION:
+ *   - Reduce DETECTION_THRESHOLD (try 5)
+ *   - Reduce STABLE_READINGS to 1
+ *   - Increase MAX_DETECTION_RANGE_M
+ *   - Ensure ENABLE_FRETTING is eON
+ *   - Check sensor is powered (5V recommended, some work on 3.3V)
+ *   - Verify sensor is in correct mode (Speed mode = eSpeedMode)
+ *
+ * PROBLEM: Too many false positives
+ * SOLUTION:
+ *   - Increase DETECTION_THRESHOLD (try 20)
+ *   - Increase STABLE_READINGS to 3-5
+ *   - Reduce MAX_DETECTION_RANGE_M
+ *   - Increase MIN_DETECTION_RANGE_M to avoid walls/furniture
+ *   - Enable ENABLE_UART_VERIFY for extra verification
+ *   - Check for sources of interference (fans, heaters, moving curtains)
+ *
+ * PROBLEM: Flickering LED (rapid on/off)
+ * SOLUTION:
+ *   - Increase DETECTION_LATCH_MS (try 5000)
+ *   - Increase STABLE_READINGS (try 3-5)
+ *   - Enable ENABLE_UART_VERIFY
+ *   - Increase DETECTION_THRESHOLD
+ *   - Check for edge-of-range detections (transition zone effect)
+ *
+ * PROBLEM: Distance readings seem inaccurate
+ * SOLUTION:
+ *   - This is NORMAL! Distances are NOT calibrated.
+ *   - The C4001 is NOT designed for precise distance measurement.
+ *   - Use distances as reference only, not for accurate measurements.
+ *   - See Sensor Manual Section 1.1 for details.
+ *
+ * PROBLEM: Detects beyond MAX_DETECTION_RANGE_M
+ * SOLUTION:
+ *   - This is NORMAL! 1m transition zone exists beyond MAX range.
+ *   - Example: MAX=6m can still detect movement at 6-25m (requires large movement).
+ *   - This is sensor hardware behavior, not a bug.
+ *   - Reduce MAX_DETECTION_RANGE_M to tighten detection area.
+ *   - See Sensor Manual Section 1.1 (transition zone) for details.
+ *
+ * PROBLEM: Can't communicate with sensor
+ * SOLUTION:
+ *   - Try BAUD_SENSOR = 115200 instead of 9600
+ *   - Check wiring (TX/RX crossover is common issue):
+ *     - Pico GP0 (TX) → Sensor RX
+ *     - Pico GP1 (RX) → Sensor TX
+ *     - GND → GND
+ *     - 5V → VCC (or 3.3V depending on sensor variant)
+ *   - Verify sensor power supply (5V recommended)
+ *   - Check for TX/RX pin swapping
+ *   - Try power cycling the sensor
+ *   - Verify sensor is C4001 model
+ *
+ * PROBLEM: Sensor works but performance is poor
+ * SOLUTION:
+ *   - Try configuring via serial terminal using protocol commands:
+ *     - Use setThrFactor to adjust sensitivity (Protocol Section 1.8)
+ *     - Use setMicroMotion to enable/disable micro-motion (Protocol Section 1.7)
+ *     - Use setRange to adjust detection range (Protocol Section 1.1)
+ *   - Consider switching to Presence mode if firmware is fixed:
+ *     - Change SENSOR_MODE to 0
+ *     - Use setSensitivity command (Protocol Section 1.3)
+ *     - Use setLatency for hardware latency (Protocol Section 1.4)
+ *     - Use setTrigRange for trigger distance (Protocol Section 1.2)
+ *
+ * PROBLEM: Want to use Presence mode features (sensitivity, latency)
+ * SOLUTION:
+ *   - ⚠️ Presence mode firmware currently has issues!
+ *   - If you want to try anyway:
+ *     - Set SENSOR_MODE = 0
+ *     - Change setSensorMode(eSpeedMode) to setSensorMode(ePresenceMode)
+ *     - Uncomment sensitivity/latency configuration code
+ *     - Test thoroughly - may not work reliably
+ *   - Alternative: Stay in Speed mode and tune DETECTION_THRESHOLD
+ *
+ * PROBLEM: Need to reconfigure sensor via serial commands
+ * REFERENCE: Communication Protocol PDF has full command list
+ *   - Section 1: Configuration commands (setRange, setSensitivity, etc.)
+ *   - Section 2: Control commands (sensorStart, sensorStop, saveConfig, etc.)
+ *   - Section 3: Active data reporting ($DFHPD, $DFDMD formats)
+ *   - Section 4: Other commands (getHWV, getSWV version info)
+ *   - Section 5: Complete configuration examples
+ *
+ * COMMON SERIAL COMMANDS (connect at 9600 or 115200 baud):
+ *   getRange              - Read current detection range
+ *   setRange 0.6 10       - Set range 0.6-10m
+ *   getThrFactor          - Read threshold factor
+ *   setThrFactor 5        - Set threshold factor
+ *   getMicroMotion        - Read micro-motion setting
+ *   setMicroMotion 1      - Enable micro-motion (0=disable)
+ *   sensorStop            - Stop sensor (required before config changes)
+ *   saveConfig            - Save settings to flash
+ *   sensorStart           - Start sensor with new settings
+ *   resetCfg              - Reset to factory defaults
+ *   getHWV                - Get hardware version
+ *   getSWV                - Get software version
+ *
+ * For detailed protocol documentation, see Communication Protocol PDF.
+ */
 
 // ============================================================================
 // END OF CODE
