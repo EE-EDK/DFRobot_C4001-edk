@@ -97,16 +97,8 @@
 #define MIN_DETECTION_RANGE_CM  ((uint16_t)(MIN_DETECTION_RANGE_M * 100))
 #define MAX_DETECTION_RANGE_CM  ((uint16_t)(MAX_DETECTION_RANGE_M * 100))
 
-// Validation
-#if MIN_DETECTION_RANGE_M < 0.3
-  #warning "Minimum range below 0.3m may cause issues"
-#endif
-#if MAX_DETECTION_RANGE_M > 20.0
-  #warning "Maximum range above 20m exceeds sensor capability"
-#endif
-#if MIN_DETECTION_RANGE_M >= MAX_DETECTION_RANGE_M
-  #error "MIN_DETECTION_RANGE must be less than MAX_DETECTION_RANGE"
-#endif
+// Note: Range validation happens at runtime in configureSensor()
+// Preprocessor #if can't use floating-point constants, so we validate in code instead
 
 // ============================================================================
 // GLOBAL OBJECTS & STATE
@@ -295,6 +287,18 @@ void configureSensor(void) {
     Serial.println(F("Configuring sensor for presence detection..."));
     Serial.println(F("  (Using Speed Mode - Presence mode firmware is broken)"));
     Serial.println();
+
+    // Runtime validation of configuration (can't use #if with floats)
+    if (MIN_DETECTION_RANGE_M >= MAX_DETECTION_RANGE_M) {
+        Serial.println(F("✗ CONFIG ERROR: MIN_DETECTION_RANGE_M must be < MAX_DETECTION_RANGE_M"));
+        while (1) { delay(1000); }
+    }
+    if (MIN_DETECTION_RANGE_M < 0.3) {
+        Serial.println(F("⚠ Warning: MIN range < 0.3m may cause issues"));
+    }
+    if (MAX_DETECTION_RANGE_M > 20.0) {
+        Serial.println(F("⚠ Warning: MAX range > 20m exceeds sensor capability"));
+    }
 
     // Step 1: Set to Speed/Range mode
     Serial.print(F("  [1/4] Setting sensor mode... "));
