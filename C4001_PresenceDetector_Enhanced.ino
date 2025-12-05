@@ -22,6 +22,20 @@
  *
  * @author  Ethan + Claude Enhanced
  * @date    2025-12-03
+ * @version 2.6 - NEW FEATURES:
+ *          - Raw UART/NMEA message debugging (see actual sensor output)
+ *          - Energy value corruption detection & filtering
+ *          - Startup buffer flushing (clears sensor garbage data)
+ *          - Data quality statistics (30s reports)
+ *          - Enhanced verbose output with corruption warnings
+ *
+ *          Based on real Saleae captures showing:
+ *          - Binary garbage at startup: \x08\xC23\x9F\xDD\xF5\xFF\xFF
+ *          - Corrupted energy values (99M+ instead of normal 1k-50k)
+ *          - NMEA format: $DFDMD,status,targets,range,velocity,energy, , *
+ *
+ * @author  Ethan + Claude Enhanced
+ * @date    2025-12-05
  * @version 2.6
  */
 
@@ -117,6 +131,11 @@
                                         // eOFF = only detect larger movements
                                         // Only effective in Speed mode (current)
 
+// --- Energy Value Filtering ---
+#define MAX_VALID_ENERGY        10000000 // Filter out absurdly large energy values
+                                         // Values > this are likely corrupted data
+                                         // Normal range: 1000-50000, but allow headroom
+
 // ============================================================================
 // OUTPUT & DISPLAY CONFIGURATION
 // ============================================================================
@@ -125,9 +144,12 @@
 #define ENABLE_VERBOSE_OUTPUT   false   // true = show every sensor reading
 #define ENABLE_STATE_CHANGES    true    // true = show only when state changes
 #define ENABLE_DETAILED_STARTUP true    // true = show full config on startup
+#define ENABLE_RAW_UART_DEBUG   true    // true = show raw NMEA messages from sensor
+#define ENABLE_DATA_QUALITY     true    // true = track and show data quality statistics
 
 // --- Status Update Frequency (when verbose) ---
 #define VERBOSE_PRINT_EVERY_N   10      // Print every Nth reading (reduce spam)
+#define RAW_UART_PRINT_EVERY_N  5       // Print raw UART every Nth message (if enabled)
 
 // ============================================================================
 // TIMING CONFIGURATION
@@ -204,6 +226,17 @@ struct SensorReading {
     float targetSpeed;      // m/s (negative = approaching)
     uint32_t targetEnergy;
     bool valid;             // Reading is within configured range
+    bool energyCorrupted;   // Energy value exceeds reasonable limits
+};
+
+// Data quality tracking
+struct DataQuality {
+    uint32_t totalReadings;
+    uint32_t validReadings;
+    uint32_t corruptedEnergy;
+    uint32_t outOfRange;
+    uint32_t detectionCount;
+    unsigned long lastReportTime;
 };
 
 // State tracking variables
@@ -213,6 +246,10 @@ unsigned long lastDetectionTime = 0;
 uint8_t consecutiveDetections = 0;
 uint8_t consecutiveClears = 0;
 uint32_t loopCounter = 0;
+uint32_t rawUartCounter = 0;
+
+// Data quality tracking
+DataQuality dataQuality = {0, 0, 0, 0, 0, 0};
 
 // ============================================================================
 // FUNCTION PROTOTYPES
@@ -222,6 +259,7 @@ void initializeSystem(void);
 void initializeHardware(void);
 void initializeSensor(void);
 void configureSensor(void);
+void flushUARTBuffer(void);
 void showConfigSummary(void);
 SensorReading readSensor(void);
 bool verifyDetectionUART(void);
@@ -230,6 +268,8 @@ void updateLED(DetectionState state);
 void errorBlinkLED(void);
 void printStateChange(DetectionState state);
 void printVerboseStatus(const SensorReading& reading, DetectionState state);
+void printRawUART(void);
+void printDataQualityReport(void);
 void printBanner(void);
 void printSeparator(void);
 
@@ -242,6 +282,14 @@ void setup() {
 }
 
 void loop() {
+    // Optional: Print raw UART data for debugging
+    if (ENABLE_RAW_UART_DEBUG) {
+        if (rawUartCounter % RAW_UART_PRINT_EVERY_N == 0) {
+            printRawUART();
+        }
+        rawUartCounter++;
+    }
+
     // Read sensor data
     SensorReading reading = readSensor();
 
@@ -259,6 +307,15 @@ void loop() {
     } else if (ENABLE_STATE_CHANGES && currentState != previousState) {
         printStateChange(currentState);
         previousState = currentState;
+    }
+
+    // Print data quality report periodically
+    if (ENABLE_DATA_QUALITY) {
+        unsigned long now = millis();
+        if (now - dataQuality.lastReportTime > 30000) { // Every 30 seconds
+            printDataQualityReport();
+            dataQuality.lastReportTime = now;
+        }
     }
 
     loopCounter++;
@@ -314,6 +371,11 @@ void initializeHardware(void) {
     Serial1.begin(BAUD_SENSOR);
     delay(200);
     Serial.println(F("  ✓ UART initialized"));
+
+    // Flush any garbage data from sensor startup
+    flushUARTBuffer();
+    Serial.println(F("  ✓ UART buffer flushed"));
+
     Serial.println();
 }
 
@@ -467,6 +529,25 @@ void configureSensor(void) {
     Serial.println();
 }
 
+void flushUARTBuffer(void) {
+    // Clear any garbage/leftover data from sensor startup
+    // The sensor often sends binary garbage before settling down
+    unsigned long startTime = millis();
+    int bytesCleared = 0;
+
+    while (Serial1.available() && (millis() - startTime < 500)) {
+        Serial1.read();
+        bytesCleared++;
+        delay(1);
+    }
+
+    if (bytesCleared > 0) {
+        Serial.print(F("    (Cleared "));
+        Serial.print(bytesCleared);
+        Serial.print(F(" bytes of startup garbage)"));
+    }
+}
+
 void showConfigSummary(void) {
     Serial.println(F("┌─── System Configuration ────────────────┐"));
 
@@ -519,6 +600,12 @@ void showConfigSummary(void) {
     Serial.print(1000 / LOOP_DELAY_MS);
     Serial.println(F(" Hz                 │"));
 
+    Serial.print(F("│ Raw UART Debug:  "));
+    Serial.println(ENABLE_RAW_UART_DEBUG ? F("Enabled              │") : F("Disabled             │"));
+
+    Serial.print(F("│ Data Quality:    "));
+    Serial.println(ENABLE_DATA_QUALITY ? F("Enabled (30s)        │") : F("Disabled             │"));
+
     Serial.println(F("└──────────────────────────────────────────┘"));
 
     // Warning if sensor not working correctly
@@ -543,9 +630,28 @@ SensorReading readSensor(void) {
     reading.targetSpeed = radarSensor.getTargetSpeed();
     reading.targetEnergy = radarSensor.getTargetEnergy();
 
+    // Track data quality
+    dataQuality.totalReadings++;
+
+    // Check for energy corruption
+    // Based on real sensor data: normal range is ~1000-50000
+    // Values > 10M are likely corrupted
+    reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY);
+    if (reading.energyCorrupted) {
+        dataQuality.corruptedEnergy++;
+    }
+
     // Validate range
     reading.valid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
                      reading.targetRange <= MAX_DETECTION_RANGE_M);
+
+    if (!reading.valid && reading.targetCount > 0) {
+        dataQuality.outOfRange++;
+    }
+
+    if (reading.valid && reading.targetCount > 0 && !reading.energyCorrupted) {
+        dataQuality.validReadings++;
+    }
 
     return reading;
 }
@@ -577,7 +683,9 @@ bool verifyDetectionUART(void) {
 DetectionState evaluateDetection(const SensorReading& reading) {
     // Check if we have a valid detection
     bool hasTarget = (reading.targetCount > 0);
-    bool currentlyDetecting = (hasTarget && reading.valid);
+
+    // Reject readings with corrupted energy values - likely bad sensor data
+    bool currentlyDetecting = (hasTarget && reading.valid && !reading.energyCorrupted);
 
     // Apply consecutive detection filter (reduce false positives)
     if (currentlyDetecting) {
@@ -591,6 +699,7 @@ DetectionState evaluateDetection(const SensorReading& reading) {
             if (ENABLE_UART_VERIFY) {
                 if (verifyDetectionUART()) {
                     lastDetectionTime = millis();
+                    dataQuality.detectionCount++;
                     return DetectionState::DETECTED;
                 } else {
                     // Failed verification, reset counter
@@ -599,6 +708,7 @@ DetectionState evaluateDetection(const SensorReading& reading) {
             } else {
                 // No verification needed
                 lastDetectionTime = millis();
+                dataQuality.detectionCount++;
                 return DetectionState::DETECTED;
             }
         }
@@ -648,7 +758,8 @@ void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
     Serial.println(F("║   mmWave Presence Detection System    ║"));
-    Serial.println(F("║        Enhanced Edition v2.5          ║"));
+    Serial.println(F("║        Enhanced Edition v2.6          ║"));
+    Serial.println(F("║    With UART Debugging & Data QC      ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
 }
@@ -693,9 +804,12 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
     Serial.print(reading.targetSpeed, 2);
     Serial.print(F("m/s"));
 
-    // Energy
+    // Energy (with corruption warning)
     Serial.print(F(" | E:"));
     Serial.print(reading.targetEnergy);
+    if (reading.energyCorrupted) {
+        Serial.print(F("!"));  // Warning flag for corrupted energy
+    }
 
     // Consecutive count
     Serial.print(F(" | Cons:"));
@@ -725,6 +839,85 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
     } else {
         Serial.println(F("[CLEAR]"));
     }
+}
+
+void printRawUART(void) {
+    // Read and display raw UART data if available
+    // This helps debug what's actually coming from the sensor
+    if (Serial1.available()) {
+        Serial.print(F("RAW UART: "));
+
+        String message = "";
+        unsigned long startTime = millis();
+
+        // Read available data (with timeout)
+        while (Serial1.available() && (millis() - startTime < 50)) {
+            char c = Serial1.read();
+
+            // Print printable characters, hex for non-printable
+            if (isPrintable(c)) {
+                Serial.print(c);
+                message += c;
+            } else {
+                Serial.print(F("\\x"));
+                if (c < 0x10) Serial.print(F("0"));
+                Serial.print(c, HEX);
+            }
+
+            // Check if we got a complete message (ends with *)
+            if (c == '*' || c == '\n') {
+                break;
+            }
+        }
+
+        Serial.println();
+
+        // If it's a NMEA message, parse and display
+        if (message.startsWith("$DFDMD,")) {
+            Serial.print(F("  └─> NMEA parsed: "));
+            Serial.println(message);
+        }
+    }
+}
+
+void printDataQualityReport(void) {
+    if (dataQuality.totalReadings == 0) {
+        return;  // No data yet
+    }
+
+    Serial.println();
+    Serial.println(F("┌─── Data Quality Report (30s) ────────────┐"));
+
+    Serial.print(F("│ Total Readings:     "));
+    Serial.print(dataQuality.totalReadings);
+    Serial.println(F("                  │"));
+
+    Serial.print(F("│ Valid Detections:   "));
+    Serial.print(dataQuality.validReadings);
+    Serial.print(F(" ("));
+    Serial.print((dataQuality.validReadings * 100) / dataQuality.totalReadings);
+    Serial.println(F("%)          │"));
+
+    Serial.print(F("│ Corrupted Energy:   "));
+    Serial.print(dataQuality.corruptedEnergy);
+    Serial.print(F(" ("));
+    Serial.print((dataQuality.corruptedEnergy * 100) / dataQuality.totalReadings);
+    Serial.println(F("%)          │"));
+
+    Serial.print(F("│ Out of Range:       "));
+    Serial.print(dataQuality.outOfRange);
+    Serial.print(F(" ("));
+    Serial.print((dataQuality.outOfRange * 100) / dataQuality.totalReadings);
+    Serial.println(F("%)          │"));
+
+    Serial.println(F("└──────────────────────────────────────────┘"));
+    Serial.println();
+
+    // Reset counters for next period
+    dataQuality.totalReadings = 0;
+    dataQuality.validReadings = 0;
+    dataQuality.corruptedEnergy = 0;
+    dataQuality.outOfRange = 0;
 }
 
 // ============================================================================
