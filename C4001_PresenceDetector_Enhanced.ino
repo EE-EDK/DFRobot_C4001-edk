@@ -37,7 +37,7 @@
  * @version 2.6.2
  */
 
-#include "src/DFRobot_C4001.h"
+#include <DFRobot_C4001.h>
 
 // ============================================================================
 // HARDWARE CONFIGURATION
@@ -146,30 +146,49 @@
 
 DFRobot_C4001_UART radarSensor(&Serial1, BAUD_SENSOR, PIN_UART_RX, PIN_UART_TX);
 
-// Detection states
+/**
+ * @enum DetectionState
+ * @brief Binary state representing presence detection status
+ * @details Two possible states:
+ *          - NO_TARGET: No presence detected or latch expired
+ *          - DETECTED: Presence confirmed and within latch period
+ * @note State transitions controlled by evaluateDetection()
+ */
 enum class DetectionState : uint8_t {
-    NO_TARGET,
-    DETECTED
+    NO_TARGET,    ///< No valid target detected
+    DETECTED      ///< Target presence confirmed
 };
 
-// Sensor reading structure
+/**
+ * @struct SensorReading
+ * @brief Contains complete sensor reading with validation flags
+ * @details Aggregates all data from a single sensor poll including detection
+ *          data (count, range, speed, energy) and validation flags (range check,
+ *          energy corruption check). Used by readSensor() and evaluateDetection().
+ */
 struct SensorReading {
-    uint8_t targetCount;
-    float targetRange;      // meters
-    float targetSpeed;      // m/s (negative = approaching)
-    uint32_t targetEnergy;
-    bool valid;             // Reading is within configured range
-    bool energyCorrupted;   // Energy value exceeds reasonable limits
+    uint8_t targetCount;      ///< Number of targets detected (0 or 1)
+    float targetRange;        ///< Distance to target in meters
+    float targetSpeed;        ///< Velocity in m/s (negative=approaching, positive=receding)
+    uint32_t targetEnergy;    ///< Signal strength (arbitrary units)
+    bool valid;               ///< true if reading is within configured range limits
+    bool energyCorrupted;     ///< true if energy value exceeds MAX_VALID_ENERGY
 };
 
-// Data quality tracking
+/**
+ * @struct DataQuality
+ * @brief Tracks data quality statistics over 30-second intervals
+ * @details Maintains rolling statistics for total readings processed, valid
+ *          detections, corrupted energy occurrences, out-of-range detections,
+ *          and detection events. Counters reset after each 30s report period.
+ */
 struct DataQuality {
-    uint32_t totalReadings;
-    uint32_t validReadings;
-    uint32_t corruptedEnergy;
-    uint32_t outOfRange;
-    uint32_t detectionCount;
-    unsigned long lastReportTime;
+    uint32_t totalReadings;      ///< Total sensor readings processed
+    uint32_t validReadings;      ///< Readings with valid range and energy
+    uint32_t corruptedEnergy;    ///< Readings with energy > MAX_VALID_ENERGY
+    uint32_t outOfRange;         ///< Detections outside configured range
+    uint32_t detectionCount;     ///< Number of confirmed detection events
+    unsigned long lastReportTime;///< Timestamp of last quality report (for 30s intervals)
 };
 
 // State tracking variables
@@ -210,10 +229,28 @@ void printSeparator(void);
 // MAIN FUNCTIONS
 // ============================================================================
 
+/**
+ * @brief Arduino setup function - called once at startup
+ * @details Delegates to initializeSystem() for complete system initialization
+ * @see initializeSystem()
+ */
 void setup() {
     initializeSystem();
 }
 
+/**
+ * @brief Arduino main loop - called repeatedly during operation
+ * @details Execution sequence each iteration:
+ *          1. Optionally display raw UART data for debugging
+ *          2. Read current sensor state
+ *          3. Evaluate detection with debouncing logic
+ *          4. Update LED to reflect detection state
+ *          5. Print status based on configuration (verbose/state changes)
+ *          6. Display data quality report every 30 seconds
+ *          7. Delay LOOP_DELAY_MS (100ms = 10Hz update rate)
+ * @note Loop rate is 10Hz with optional UART verification adding ~20-40ms
+ * @see LOOP_DELAY_MS, readSensor(), evaluateDetection(), updateLED()
+ */
 void loop() {
     // Optional: Print raw UART data for debugging
     if (ENABLE_RAW_UART_DEBUG) {
@@ -259,6 +296,18 @@ void loop() {
 // INITIALIZATION
 // ============================================================================
 
+/**
+ * @brief Initializes the complete system including hardware, sensor, and timing
+ * @details Performs the following initialization sequence:
+ *          1. Starts USB serial communication with SERIAL_TIMEOUT_MS timeout
+ *          2. Prints startup banner
+ *          3. Initializes hardware (LED, UART)
+ *          4. Connects to and configures the mmWave sensor
+ *          5. Displays configuration summary if ENABLE_DETAILED_STARTUP is true
+ *          6. Initializes detection timing baseline
+ * @note Called once from setup()
+ * @see initializeHardware(), initializeSensor(), configureSensor()
+ */
 void initializeSystem(void) {
     // Start USB serial for debugging
     Serial.begin(BAUD_DEBUG);
@@ -292,6 +341,15 @@ void initializeSystem(void) {
     lastDetectionTime = millis();
 }
 
+/**
+ * @brief Configures GPIO pins and UART interface
+ * @details Sets up the following hardware:
+ *          1. LED pin as output with initial state based on INVERT_LED_LOGIC
+ *          2. UART interface (Serial1) at configured baud rate
+ *          3. Flushes UART buffer to clear sensor startup garbage
+ * @note LED state respects INVERT_LED_LOGIC configuration
+ * @see PIN_STATUS_LED, BAUD_SENSOR, INVERT_LED_LOGIC, flushUARTBuffer()
+ */
 void initializeHardware(void) {
     Serial.println(F("Initializing hardware..."));
 
@@ -312,6 +370,17 @@ void initializeHardware(void) {
     Serial.println();
 }
 
+/**
+ * @brief Establishes communication with the C4001 mmWave sensor
+ * @details Attempts to connect to the sensor with retry logic:
+ *          - Tries up to 5 connection attempts with 1s delay between attempts
+ *          - Displays connection progress to serial monitor
+ *          - On failure: shows detailed troubleshooting guide with wiring diagram
+ *          - On success: proceeds to configureSensor()
+ * @note Blocks indefinitely on failure with LED error blink if LED_BLINK_ON_ERROR enabled
+ * @warning System halts if sensor cannot be contacted after max attempts
+ * @see LED_BLINK_ON_ERROR, errorBlinkLED(), configureSensor()
+ */
 void initializeSensor(void) {
     Serial.println(F("Connecting to mmWave sensor..."));
     Serial.print(F("  Baud rate: "));
@@ -363,6 +432,20 @@ void initializeSensor(void) {
     Serial.println();
 }
 
+/**
+ * @brief Configures sensor parameters for presence detection operation
+ * @details Configuration sequence performed:
+ *          1. Validates range configuration at runtime (MIN < MAX, reasonable values)
+ *          2. Sets sensor to Speed Mode (workaround for broken Presence Mode firmware)
+ *          3. Configures detection range (MIN_DETECTION_RANGE_CM to MAX_DETECTION_RANGE_CM)
+ *          4. Sets detection threshold (DETECTION_THRESHOLD)
+ *          5. Enables/disables micro-motion (fretting) detection
+ *          6. Saves configuration to sensor non-volatile memory
+ *          7. Starts sensor operation
+ * @note Uses Speed Mode instead of Presence Mode due to firmware bug
+ * @warning Halts system if MIN_DETECTION_RANGE_M >= MAX_DETECTION_RANGE_M
+ * @see MIN_DETECTION_RANGE_M, MAX_DETECTION_RANGE_M, DETECTION_THRESHOLD, ENABLE_FRETTING
+ */
 void configureSensor(void) {
     Serial.println(F("Configuring sensor for presence detection..."));
     Serial.println(F("  (Using Speed Mode - Presence mode firmware is broken)"));
@@ -425,6 +508,16 @@ void configureSensor(void) {
     Serial.println();
 }
 
+/**
+ * @brief Clears UART receive buffer of startup garbage data
+ * @details The C4001 sensor transmits binary garbage on power-up before
+ *          settling into normal NMEA message format. This function:
+ *          - Reads and discards all available bytes for up to 500ms
+ *          - Reports number of bytes cleared for diagnostic purposes
+ *          - Prevents garbage data from corrupting initial readings
+ * @note Typical clearing: 40-70 bytes of garbage data (e.g., \x08\xC23\x9F\xDD\xF5\xFF\xFF)
+ * @note Expected NMEA format after stabilization: $DFDMD,status,targets,range,velocity,energy,,*
+ */
 void flushUARTBuffer(void) {
     // Clear any garbage/leftover data from sensor startup
     // The sensor often sends binary garbage before settling down
@@ -444,6 +537,22 @@ void flushUARTBuffer(void) {
     }
 }
 
+/**
+ * @brief Displays comprehensive system configuration table
+ * @details Formatted output showing:
+ *          - Sensor operational status (RUNNING/ERROR)
+ *          - Operating mode (Speed Mode acting as Presence-like)
+ *          - Detection range limits (MIN to MAX in meters)
+ *          - Threshold settings with readback verification
+ *          - Fretting (micro-motion) detection status
+ *          - Software latch duration in seconds
+ *          - Debouncing parameters (stable readings, UART verification)
+ *          - Loop rate in Hz
+ *          - Debug options (raw UART, data quality)
+ * @note Only displayed if ENABLE_DETAILED_STARTUP is true
+ * @note Displays warning if sensor workStatus or initStatus indicate error
+ * @see ENABLE_DETAILED_STARTUP, sSensorStatus_t
+ */
 void showConfigSummary(void) {
     Serial.println(F("┌─── System Configuration ────────────────┐"));
 
@@ -517,6 +626,24 @@ void showConfigSummary(void) {
 // SENSOR READING & DETECTION LOGIC
 // ============================================================================
 
+/**
+ * @brief Reads current sensor data and validates quality
+ * @details Performs the following operations:
+ *          1. Reads target count, range, speed, and energy from sensor
+ *          2. Increments total readings counter for quality tracking
+ *          3. Checks for energy corruption (values > MAX_VALID_ENERGY)
+ *          4. Validates range is within MIN_DETECTION_RANGE_M to MAX_DETECTION_RANGE_M
+ *          5. Updates data quality statistics counters
+ * @return SensorReading structure containing:
+ *         - targetCount: Number of detected targets (0 or 1)
+ *         - targetRange: Distance in meters
+ *         - targetSpeed: Velocity in m/s (negative=approaching, positive=receding)
+ *         - targetEnergy: Signal strength (arbitrary units, normal: 1k-50k)
+ *         - valid: true if range is within configured limits
+ *         - energyCorrupted: true if energy > MAX_VALID_ENERGY
+ * @note Energy corruption occurs in ~20% of readings due to sensor firmware issues
+ * @see SensorReading, MAX_VALID_ENERGY, dataQuality, DataQuality
+ */
 SensorReading readSensor(void) {
     SensorReading reading;
 
@@ -552,6 +679,18 @@ SensorReading readSensor(void) {
     return reading;
 }
 
+/**
+ * @brief Performs additional UART verification reads to confirm detection
+ * @details Reduces false positives by:
+ *          - Reading sensor UART_VERIFY_SAMPLES times with 10ms intervals
+ *          - Checking each reading for valid target count and range
+ *          - Requiring majority agreement for verification (>50% must agree)
+ * @return true if majority of verification samples show valid detection
+ * @return false if verification fails (will reset consecutive detection counter)
+ * @note Only called when ENABLE_UART_VERIFY is true
+ * @note Adds ~20-40ms latency to detection but significantly reduces false triggers
+ * @see ENABLE_UART_VERIFY, UART_VERIFY_SAMPLES, evaluateDetection()
+ */
 bool verifyDetectionUART(void) {
     // Perform additional UART reads to verify detection
     // This reduces false positives from communication glitches
@@ -576,6 +715,22 @@ bool verifyDetectionUART(void) {
     return (verifiedCount >= (UART_VERIFY_SAMPLES / 2 + 1));
 }
 
+/**
+ * @brief Evaluates sensor reading and applies debouncing logic
+ * @details Multi-stage detection algorithm:
+ *          1. Checks if target exists with valid range and non-corrupted energy
+ *          2. Requires STABLE_READINGS consecutive valid readings for confirmation
+ *          3. Optionally performs UART verification for extra robustness
+ *          4. Updates lastDetectionTime on confirmed detection
+ *          5. Applies software latch (stays DETECTED for DETECTION_LATCH_MS)
+ *          6. Returns to NO_TARGET only after latch expires
+ * @param reading Current sensor reading with validation flags
+ * @return DetectionState::DETECTED if target confirmed or within latch period
+ * @return DetectionState::NO_TARGET if no valid detection and latch expired
+ * @note Software latch prevents flickering during continuous motion
+ * @note Energy-corrupted readings are rejected to avoid false positives
+ * @see STABLE_READINGS, DETECTION_LATCH_MS, ENABLE_UART_VERIFY, verifyDetectionUART()
+ */
 DetectionState evaluateDetection(const SensorReading& reading) {
     // Check if we have a valid detection
     bool hasTarget = (reading.targetCount > 0);
@@ -627,6 +782,17 @@ DetectionState evaluateDetection(const SensorReading& reading) {
 // OUTPUT CONTROL
 // ============================================================================
 
+/**
+ * @brief Updates LED state based on detection status
+ * @details LED behavior:
+ *          - ON when DetectionState::DETECTED (presence confirmed)
+ *          - OFF when DetectionState::NO_TARGET (clear)
+ *          - Respects INVERT_LED_LOGIC for active-low LED configurations
+ * @param state Current detection state (DETECTED or NO_TARGET)
+ * @note LED logic automatically inverted if INVERT_LED_LOGIC is true
+ * @note LED remains ON during entire latch period, not just on fresh detections
+ * @see PIN_STATUS_LED, INVERT_LED_LOGIC, DetectionState
+ */
 void updateLED(DetectionState state) {
     bool ledShouldBeOn = (state == DetectionState::DETECTED);
 
@@ -638,6 +804,16 @@ void updateLED(DetectionState state) {
     digitalWrite(PIN_STATUS_LED, ledShouldBeOn ? HIGH : LOW);
 }
 
+/**
+ * @brief Blinks LED rapidly to indicate fatal error condition
+ * @details Infinite loop that:
+ *          - Toggles LED every ERROR_BLINK_MS milliseconds
+ *          - Never returns (system is halted)
+ *          - Used when sensor connection fails after max retry attempts
+ * @note This function never returns - system requires reset after error
+ * @warning Only called on unrecoverable errors (e.g., sensor not responding)
+ * @see LED_BLINK_ON_ERROR, ERROR_BLINK_MS, initializeSensor()
+ */
 void errorBlinkLED(void) {
     // Blink LED rapidly to indicate error - never returns
     while (true) {
@@ -650,6 +826,15 @@ void errorBlinkLED(void) {
 // STATUS PRINTING
 // ============================================================================
 
+/**
+ * @brief Displays startup banner with version information
+ * @details Shows:
+ *          - System title: "mmWave Presence Detection System"
+ *          - Version number: "Enhanced Edition v2.6.2"
+ *          - Optimization note: "Saleae-Optimized | 98%+ Coverage"
+ * @note Called once during system initialization
+ * @see initializeSystem()
+ */
 void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
@@ -660,10 +845,27 @@ void printBanner(void) {
     Serial.println();
 }
 
+/**
+ * @brief Prints a horizontal line separator for visual formatting
+ * @details Outputs a 42-character dash line for sectioning output
+ * @note Used to visually separate sections in startup sequence and reports
+ */
 void printSeparator(void) {
     Serial.println(F("──────────────────────────────────────────"));
 }
 
+/**
+ * @brief Displays formatted notification when detection state changes
+ * @details Shows:
+ *          - Green indicator (🟢) and "PRESENCE DETECTED" for DETECTED state
+ *          - Latch duration information (how long state will persist)
+ *          - Black indicator (⚫) and "NO PRESENCE" for NO_TARGET state
+ *          - "Monitoring..." status message
+ * @param state New detection state to display
+ * @note Only displayed when ENABLE_STATE_CHANGES is true
+ * @note Not called if state hasn't changed since last check
+ * @see ENABLE_STATE_CHANGES, DETECTION_LATCH_MS, DetectionState
+ */
 void printStateChange(DetectionState state) {
     Serial.println();
     Serial.println(F("╔═══════════════════════════════════════╗"));
@@ -682,6 +884,22 @@ void printStateChange(DetectionState state) {
     Serial.println();
 }
 
+/**
+ * @brief Displays detailed single-line sensor status for continuous monitoring
+ * @details Compact format showing:
+ *          - T: Target count (0 or 1)
+ *          - R: Range in meters (2 decimal places)
+ *          - S: Speed in m/s (+ for receding, - for approaching)
+ *          - E: Energy with corruption flag (! if corrupted)
+ *          - Cons: Consecutive detection count
+ *          - ✓/✗: Valid reading flag
+ *          - [DETECTED +Xs] or [CLEAR]: State with latch countdown
+ * @param reading Current sensor reading data
+ * @param state Current detection state
+ * @note Only called when ENABLE_VERBOSE_OUTPUT is true
+ * @note Prints every VERBOSE_PRINT_EVERY_N readings to reduce spam
+ * @see ENABLE_VERBOSE_OUTPUT, VERBOSE_PRINT_EVERY_N
+ */
 void printVerboseStatus(const SensorReading& reading, DetectionState state) {
     // Compact single-line output for continuous monitoring
 
@@ -737,6 +955,20 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
     }
 }
 
+/**
+ * @brief Captures and displays raw UART data from sensor
+ * @details Debug functionality that:
+ *          - Reads available UART data with 100ms timeout
+ *          - Displays printable characters as-is
+ *          - Shows non-printable characters in \xHH hex format
+ *          - Captures trailing \r\n characters for complete frames
+ *          - Identifies and parses NMEA $DFDMD messages
+ * @note Only called every RAW_UART_PRINT_EVERY_N loops when ENABLE_RAW_UART_DEBUG is true
+ * @note May show fragmented messages if called mid-transmission
+ * @note This debug output is separate from main detection logic (for diagnostics only)
+ * @warning Can interfere with timing if called too frequently
+ * @see ENABLE_RAW_UART_DEBUG, RAW_UART_PRINT_EVERY_N
+ */
 void printRawUART(void) {
     // Read and display raw UART data if available
     // This helps debug what's actually coming from the sensor
@@ -791,6 +1023,19 @@ void printRawUART(void) {
     }
 }
 
+/**
+ * @brief Displays 30-second data quality statistics summary
+ * @details Reports:
+ *          - Total readings processed since last report
+ *          - Valid detections (in-range with good energy) with percentage
+ *          - Corrupted energy readings with percentage
+ *          - Out-of-range readings with percentage
+ *          - All percentages calculated relative to total readings
+ * @note Automatically called every 30 seconds when ENABLE_DATA_QUALITY is true
+ * @note Counters reset after each report for rolling statistics
+ * @note Returns immediately if no data collected (totalReadings == 0)
+ * @see ENABLE_DATA_QUALITY, DataQuality, dataQuality
+ */
 void printDataQualityReport(void) {
     if (dataQuality.totalReadings == 0) {
         return;  // No data yet
