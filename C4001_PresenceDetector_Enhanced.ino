@@ -959,10 +959,9 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
  * @brief Captures and displays raw UART data from sensor
  * @details Debug functionality that:
  *          - Reads available UART data with 100ms timeout
- *          - Displays printable characters as-is
- *          - Shows non-printable characters in \xHH hex format
- *          - Captures trailing \r\n characters for complete frames
- *          - Identifies and parses NMEA $DFDMD messages
+ *          - Parses NMEA $DFDMD messages into readable table format
+ *          - Shows fragmented messages in raw hex format
+ *          - Displays status, targets, range, velocity, and energy
  * @note Only called every RAW_UART_PRINT_EVERY_N loops when ENABLE_RAW_UART_DEBUG is true
  * @note May show fragmented messages if called mid-transmission
  * @note This debug output is separate from main detection logic (for diagnostics only)
@@ -971,41 +970,25 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
  */
 void printRawUART(void) {
     // Read and display raw UART data if available
-    // This helps debug what's actually coming from the sensor
     if (Serial1.available()) {
-        Serial.print(F("RAW UART: "));
-
         String message = "";
         unsigned long startTime = millis();
 
         // Read available data (with timeout)
-        // Increased timeout to 100ms to capture complete NMEA messages
         while (Serial1.available() && (millis() - startTime < 100)) {
             char c = Serial1.read();
 
-            // Print printable characters, hex for non-printable
-            if (isPrintable(c)) {
-                Serial.print(c);
+            if (isPrintable(c) && c != '\r' && c != '\n') {
                 message += c;
-            } else {
-                Serial.print(F("\\x"));
-                if (c < 0x10) Serial.print(F("0"));
-                Serial.print(c, HEX);
             }
 
             // Check if we got a complete message (ends with * or newline)
             if (c == '*' || c == '\n' || c == '\r') {
-                // Read any trailing newline characters
                 delay(2);  // Small delay for any trailing chars
                 while (Serial1.available()) {
                     char trailing = Serial1.read();
                     if (isPrintable(trailing) && trailing != '\r' && trailing != '\n') {
-                        Serial.print(trailing);
                         message += trailing;
-                    } else if (trailing == '\r' || trailing == '\n') {
-                        Serial.print(F("\\x"));
-                        if (trailing < 0x10) Serial.print(F("0"));
-                        Serial.print((byte)trailing, HEX);
                     }
                     if (trailing == '\n') break;
                 }
@@ -1013,11 +996,93 @@ void printRawUART(void) {
             }
         }
 
-        Serial.println();
-
-        // If it's a NMEA message, parse and display
+        // Parse NMEA message if complete and valid
         if (message.startsWith("$DFDMD,")) {
-            Serial.print(F("  └─> NMEA parsed: "));
+            // Parse NMEA: $DFDMD,status,targets,range,velocity,energy, , *
+            int commaPos[7];
+            int commaCount = 0;
+
+            for (int i = 0; i < message.length() && commaCount < 7; i++) {
+                if (message.charAt(i) == ',') {
+                    commaPos[commaCount++] = i;
+                }
+            }
+
+            if (commaCount >= 5) {
+                String statusStr = message.substring(commaPos[0] + 1, commaPos[1]);
+                String targetsStr = message.substring(commaPos[1] + 1, commaPos[2]);
+                String rangeStr = message.substring(commaPos[2] + 1, commaPos[3]);
+                String velocityStr = message.substring(commaPos[3] + 1, commaPos[4]);
+                String energyStr = message.substring(commaPos[4] + 1, commaPos[5]);
+
+                Serial.println();
+                Serial.println(F("┌─── RAW UART Data ─────────────────────┐"));
+
+                // Status (right-aligned, 1 char wide)
+                Serial.print(F("│  Status:                   "));
+                if (statusStr.length() > 0) {
+                    for (int i = statusStr.length(); i < 10; i++) Serial.print(F(" "));
+                    Serial.print(statusStr);
+                } else {
+                    for (int i = 1; i < 10; i++) Serial.print(F(" "));
+                    Serial.print(F("—"));
+                }
+                Serial.println(F("  │"));
+
+                // Targets (right-aligned, 1 char wide)
+                Serial.print(F("│  Targets:                  "));
+                if (targetsStr.length() > 0) {
+                    for (int i = targetsStr.length(); i < 10; i++) Serial.print(F(" "));
+                    Serial.print(targetsStr);
+                } else {
+                    for (int i = 1; i < 10; i++) Serial.print(F(" "));
+                    Serial.print(F("—"));
+                }
+                Serial.println(F("  │"));
+
+                // Range (right-aligned, with units)
+                Serial.print(F("│  Range:              "));
+                if (rangeStr.length() > 0) {
+                    for (int i = rangeStr.length(); i < 10; i++) Serial.print(F(" "));
+                    Serial.print(rangeStr);
+                    Serial.print(F(" m"));
+                } else {
+                    for (int i = 1; i < 10; i++) Serial.print(F(" "));
+                    Serial.print(F("—"));
+                    Serial.print(F("  "));
+                }
+                Serial.println(F("  │"));
+
+                // Velocity (right-aligned, with units)
+                Serial.print(F("│  Velocity:           "));
+                if (velocityStr.length() > 0) {
+                    for (int i = velocityStr.length(); i < 10; i++) Serial.print(F(" "));
+                    Serial.print(velocityStr);
+                    Serial.print(F(" m/s"));
+                } else {
+                    for (int i = 1; i < 10; i++) Serial.print(F(" "));
+                    Serial.print(F("—"));
+                    Serial.print(F("    "));
+                }
+                Serial.println(F("│"));
+
+                // Energy (right-aligned, no units)
+                Serial.print(F("│  Energy:             "));
+                if (energyStr.length() > 0) {
+                    for (int i = energyStr.length(); i < 10; i++) Serial.print(F(" "));
+                    Serial.print(energyStr);
+                } else {
+                    for (int i = 1; i < 10; i++) Serial.print(F(" "));
+                    Serial.print(F("—"));
+                }
+                Serial.println(F("    │"));
+
+                Serial.println(F("└────────────────────────────────────────┘"));
+                Serial.println();
+            }
+        } else if (message.length() > 0) {
+            // Show fragmented/incomplete messages in compact format
+            Serial.print(F("RAW [Fragment]: "));
             Serial.println(message);
         }
     }
