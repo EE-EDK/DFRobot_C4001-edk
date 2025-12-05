@@ -8,6 +8,11 @@
  *          - UART verification for reliability
  *          - Comprehensive configuration via #defines
  *
+ * @version 2.6.1 - UPDATES:
+ *          - Fixed detection range defaults (0.5-3.0m) based on real deployment
+ *          - Improved UART message capture (100ms timeout, reads complete messages)
+ *          - Enhanced trailing character handling for complete NMEA frames
+ *
  * @version 2.6 - NEW FEATURES:
  *          - Raw UART/NMEA message debugging (see actual sensor output)
  *          - Energy value corruption detection & filtering
@@ -19,10 +24,11 @@
  *          - Binary garbage at startup: \x08\xC23\x9F\xDD\xF5\xFF\xFF
  *          - Corrupted energy values (99M+ instead of normal 1k-50k)
  *          - NMEA format: $DFDMD,status,targets,range,velocity,energy, , *
+ *          - Typical detection range in practice: 0.3m - 2.0m
  *
  * @author  Ethan + Claude Enhanced
  * @date    2025-12-05
- * @version 2.6
+ * @version 2.6.1
  */
 
 #include "src/DFRobot_C4001.h"
@@ -53,11 +59,14 @@
 // ============================================================================
 
 // Smart range filtering to avoid false triggers
-#define MIN_DETECTION_RANGE_M   2.0     // Ignore closer objects (walls, furniture)
-#define MAX_DETECTION_RANGE_M   6.0     // Maximum useful detection distance
+// IMPORTANT: Adjust these based on your actual sensor readings!
+// Check the RAW UART output to see what ranges your sensor actually reports
+#define MIN_DETECTION_RANGE_M   0.5     // Minimum detection (sensor can go as low as 0.3m)
+#define MAX_DETECTION_RANGE_M   3.0     // Maximum detection distance
 
-// Note: Using 2.0m minimum prevents triggering on nearby walls/objects
-// Adjust based on your room size and sensor mounting
+// Note: If you see "Out of Range: XX%" in data quality reports,
+// adjust these values to match your sensor's actual output range
+// Example ranges from real deployment: 0.3m - 2.0m typical
 
 // ============================================================================
 // DETECTION BEHAVIOR CONFIGURATION
@@ -635,7 +644,7 @@ void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
     Serial.println(F("║   mmWave Presence Detection System    ║"));
-    Serial.println(F("║        Enhanced Edition v2.6          ║"));
+    Serial.println(F("║       Enhanced Edition v2.6.1         ║"));
     Serial.println(F("║    With UART Debugging & Data QC      ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
@@ -728,7 +737,8 @@ void printRawUART(void) {
         unsigned long startTime = millis();
 
         // Read available data (with timeout)
-        while (Serial1.available() && (millis() - startTime < 50)) {
+        // Increased timeout to 100ms to capture complete NMEA messages
+        while (Serial1.available() && (millis() - startTime < 100)) {
             char c = Serial1.read();
 
             // Print printable characters, hex for non-printable
@@ -741,8 +751,22 @@ void printRawUART(void) {
                 Serial.print(c, HEX);
             }
 
-            // Check if we got a complete message (ends with *)
-            if (c == '*' || c == '\n') {
+            // Check if we got a complete message (ends with * or newline)
+            if (c == '*' || c == '\n' || c == '\r') {
+                // Read any trailing newline characters
+                delay(2);  // Small delay for any trailing chars
+                while (Serial1.available()) {
+                    char trailing = Serial1.read();
+                    if (isPrintable(trailing) && trailing != '\r' && trailing != '\n') {
+                        Serial.print(trailing);
+                        message += trailing;
+                    } else if (trailing == '\r' || trailing == '\n') {
+                        Serial.print(F("\\x"));
+                        if (trailing < 0x10) Serial.print(F("0"));
+                        Serial.print((byte)trailing, HEX);
+                    }
+                    if (trailing == '\n') break;
+                }
                 break;
             }
         }
