@@ -868,19 +868,19 @@ void printSeparator(void) {
  */
 void printStateChange(DetectionState state) {
     Serial.println();
-    Serial.println(F("╔═══════════════════════════════════════╗"));
+    Serial.println(F("┌───────────────────────────────────────┐"));
 
     if (state == DetectionState::DETECTED) {
-        Serial.println(F("║      🟢 PRESENCE DETECTED             ║"));
-        Serial.print(F("║      Latch: "));
+        Serial.println(F("│  🟢 PRESENCE DETECTED                 │"));
+        Serial.print(F("│  Latch Duration:  "));
         Serial.print(DETECTION_LATCH_MS / 1000.0, 1);
-        Serial.println(F(" seconds             ║"));
+        Serial.println(F(" sec             │"));
     } else {
-        Serial.println(F("║      ⚫ NO PRESENCE                   ║"));
-        Serial.println(F("║      Monitoring...                    ║"));
+        Serial.println(F("│  ⚫ NO PRESENCE DETECTED              │"));
+        Serial.println(F("│  Status:          Monitoring...       │"));
     }
 
-    Serial.println(F("╚═══════════════════════════════════════╝"));
+    Serial.println(F("└───────────────────────────────────────┘"));
     Serial.println();
 }
 
@@ -1042,31 +1042,58 @@ void printDataQualityReport(void) {
     }
 
     Serial.println();
-    Serial.println(F("┌─── Data Quality Report (30s) ────────────┐"));
+    Serial.println(F("┌─── Data Quality Report (30s) ─────────┐"));
+    Serial.println(F("│                                        │"));
 
-    Serial.print(F("│ Total Readings:     "));
+    // Calculate percentages
+    uint8_t validPct = (dataQuality.validReadings * 100) / dataQuality.totalReadings;
+    uint8_t corruptPct = (dataQuality.corruptedEnergy * 100) / dataQuality.totalReadings;
+    uint8_t outOfRangePct = (dataQuality.outOfRange * 100) / dataQuality.totalReadings;
+
+    // Total Readings
+    Serial.print(F("│  Total Readings:        "));
+    if (dataQuality.totalReadings < 10) Serial.print(F(" "));
+    if (dataQuality.totalReadings < 100) Serial.print(F(" "));
     Serial.print(dataQuality.totalReadings);
-    Serial.println(F("                  │"));
+    Serial.println(F("          │"));
 
-    Serial.print(F("│ Valid Detections:   "));
+    Serial.println(F("│                                        │"));
+
+    // Valid Detections
+    Serial.print(F("│  Valid Detections:      "));
+    if (dataQuality.validReadings < 10) Serial.print(F(" "));
+    if (dataQuality.validReadings < 100) Serial.print(F(" "));
     Serial.print(dataQuality.validReadings);
     Serial.print(F(" ("));
-    Serial.print((dataQuality.validReadings * 100) / dataQuality.totalReadings);
-    Serial.println(F("%)          │"));
+    if (validPct < 10) Serial.print(F(" "));
+    if (validPct < 100) Serial.print(F(" "));
+    Serial.print(validPct);
+    Serial.println(F("%)      │"));
 
-    Serial.print(F("│ Corrupted Energy:   "));
+    // Corrupted Energy
+    Serial.print(F("│  Corrupted Energy:      "));
+    if (dataQuality.corruptedEnergy < 10) Serial.print(F(" "));
+    if (dataQuality.corruptedEnergy < 100) Serial.print(F(" "));
     Serial.print(dataQuality.corruptedEnergy);
     Serial.print(F(" ("));
-    Serial.print((dataQuality.corruptedEnergy * 100) / dataQuality.totalReadings);
-    Serial.println(F("%)          │"));
+    if (corruptPct < 10) Serial.print(F(" "));
+    if (corruptPct < 100) Serial.print(F(" "));
+    Serial.print(corruptPct);
+    Serial.println(F("%)      │"));
 
-    Serial.print(F("│ Out of Range:       "));
+    // Out of Range
+    Serial.print(F("│  Out of Range:          "));
+    if (dataQuality.outOfRange < 10) Serial.print(F(" "));
+    if (dataQuality.outOfRange < 100) Serial.print(F(" "));
     Serial.print(dataQuality.outOfRange);
     Serial.print(F(" ("));
-    Serial.print((dataQuality.outOfRange * 100) / dataQuality.totalReadings);
-    Serial.println(F("%)          │"));
+    if (outOfRangePct < 10) Serial.print(F(" "));
+    if (outOfRangePct < 100) Serial.print(F(" "));
+    Serial.print(outOfRangePct);
+    Serial.println(F("%)      │"));
 
-    Serial.println(F("└──────────────────────────────────────────┘"));
+    Serial.println(F("│                                        │"));
+    Serial.println(F("└────────────────────────────────────────┘"));
     Serial.println();
 
     // Reset counters for next period
