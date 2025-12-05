@@ -1,0 +1,21 @@
+<map id="setup" name="setup">
+<area shape="rect" id="Node000001" title="Arduino setup function &#45; called once at startup." alt="" coords="5,132,59,159"/>
+<area shape="rect" id="Node000002" href="$C4001__PresenceDetector__Enhanced_8ino.html#a19ebe9f470610e6867c7f4724aa5da9b" title="Initializes the complete system including hardware, sensor, and timing." alt="" coords="107,132,220,159"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="59,143,91,143,91,148,59,148"/>
+<area shape="rect" id="Node000003" href="$C4001__PresenceDetector__Enhanced_8ino.html#a1bbf01d7c19516e03b785a46ad253489" title="Configures sensor parameters for presence detection operation." alt="" coords="284,5,399,32"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="173,130,212,87,238,63,267,42,276,37,278,41,269,46,241,67,215,91,177,133"/>
+<area shape="rect" id="Node000004" href="$C4001__PresenceDetector__Enhanced_8ino.html#a3ea452b7c2e273c2acaf4b4cd1226551" title="Configures GPIO pins and UART interface." alt="" coords="279,56,403,83"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="190,129,267,92,283,86,285,91,269,97,192,134"/>
+<area shape="rect" id="Node000006" href="$C4001__PresenceDetector__Enhanced_8ino.html#a4066fee59cab4813a54b5ea829fbc4b8" title="Establishes communication with the C4001 mmWave sensor." alt="" coords="286,107,396,133"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="220,135,271,127,272,133,221,140"/>
+<area shape="rect" id="Node000008" href="$C4001__PresenceDetector__Enhanced_8ino.html#afd103a86628d52e31c71db6179309ac0" title="Displays startup banner with version information." alt="" coords="298,157,385,184"/>
+<area shape="poly" id="edge7_Node000002_Node000008" title=" " alt="" coords="221,151,283,160,282,165,220,156"/>
+<area shape="rect" id="Node000009" href="$C4001__PresenceDetector__Enhanced_8ino.html#a46f11da4f5c73c8ee975083968e25202" title="Prints a horizontal line separator for visual formatting." alt="" coords="290,208,392,235"/>
+<area shape="poly" id="edge8_Node000002_Node000009" title=" " alt="" coords="192,157,269,194,285,200,283,205,267,198,190,162"/>
+<area shape="rect" id="Node000010" href="$C4001__PresenceDetector__Enhanced_8ino.html#ab8ad5111ed93fe6c07e357b7820ba46d" title="Displays comprehensive system configuration table." alt="" coords="268,259,414,285"/>
+<area shape="poly" id="edge9_Node000002_Node000010" title=" " alt="" coords="177,157,215,200,241,224,269,244,278,249,276,254,267,249,238,228,212,204,173,161"/>
+<area shape="rect" id="Node000005" href="$C4001__PresenceDetector__Enhanced_8ino.html#a8b4babcb1b5677eaf9b45d99d0f35162" title="Clears UART receive buffer of startup garbage data." alt="" coords="462,56,582,83"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="404,67,447,67,447,72,404,72"/>
+<area shape="rect" id="Node000007" href="$C4001__PresenceDetector__Enhanced_8ino.html#a960c58e545f44c47776b31c4842c4a79" title="Blinks LED rapidly to indicate fatal error condition." alt="" coords="471,107,573,133"/>
+<area shape="poly" id="edge6_Node000006_Node000007" title=" " alt="" coords="396,117,455,117,455,123,396,123"/>
+</map>

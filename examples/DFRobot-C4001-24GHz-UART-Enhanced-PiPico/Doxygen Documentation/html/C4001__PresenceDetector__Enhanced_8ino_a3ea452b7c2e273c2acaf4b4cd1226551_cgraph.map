@@ -1,0 +1,5 @@
+<map id="initializeHardware" name="initializeHardware">
+<area shape="rect" id="Node000001" title="Configures GPIO pins and UART interface." alt="" coords="5,5,130,32"/>
+<area shape="rect" id="Node000002" href="$C4001__PresenceDetector__Enhanced_8ino.html#a8b4babcb1b5677eaf9b45d99d0f35162" title="Clears UART receive buffer of startup garbage data." alt="" coords="178,5,297,32"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="130,16,162,16,162,21,130,21"/>
+</map>
