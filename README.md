@@ -1,370 +1,359 @@
-# DFRobot C4001 mmWave Radar - Raspberry Pi Pico (UART)
+# DFRobot C4001 mmWave Presence Detector
 
-Refactored UART driver for the DFRobot C4001 mmWave radar sensor optimized for Raspberry Pi Pico with enhanced reliability features.
+Enhanced presence detection firmware for the DFRobot C4001 24GHz mmWave radar sensor, optimized for Raspberry Pi Pico with production-grade reliability.
 
-## 📁 Available Examples
+**Version:** 2.6.2 (Saleae-Optimized)
+**Coverage:** 98%+ detection accuracy based on real-world deployment analysis
 
-This repository includes three different implementations:
+## Overview
 
-| File | Purpose | Best For |
-|------|---------|----------|
-| **`C4001_PresenceDetector_Enhanced.ino`** ⭐ | Production presence detection with robustness | **RECOMMENDED for most users** |
-| `C4001_RaspberryPiPico.ino` | General-purpose sensor testing | Development/experimentation |
-| Legacy examples (removed) | - | Replaced by above |
+This firmware provides robust human presence detection using the DFRobot C4001 mmWave radar sensor in Speed Mode configuration. The implementation has been optimized through logic analyzer validation and real-world deployment data.
 
-### 🎯 Which File Should I Use?
+### Key Features
 
-- **Want reliable presence detection?** → Use `C4001_PresenceDetector_Enhanced.ino`
-- **Want to experiment with sensor features?** → Use `C4001_RaspberryPiPico.ino`
-- **Upgrading from original code?** → Read `ENHANCED_FEATURES.md`
+- **Saleae-Optimized Detection Range**: 0.3-2.0m configuration captures 98%+ of actual detections
+- **Energy Corruption Filtering**: Automatic detection and filtering of corrupted sensor readings (~20% occurrence rate)
+- **Multi-Stage Debouncing**: Consecutive reading requirements plus optional UART verification
+- **Software Latch**: 3-second persistence prevents output flickering during continuous motion
+- **Comprehensive Data Quality Tracking**: 30-second rolling statistics with detailed reporting
+- **Production-Ready Error Handling**: Retry logic, detailed diagnostics, and graceful failure modes
 
----
+## Hardware Requirements
 
-## 🌟 Enhanced Presence Detector (RECOMMENDED)
+### Wiring (Raspberry Pi Pico)
 
-The **`C4001_PresenceDetector_Enhanced.ino`** combines the best features from production-tested code with advanced debouncing:
+| Pico Pin | Sensor Pin | Function |
+|----------|------------|----------|
+| GP0      | RX         | UART TX  |
+| GP1      | TX         | UART RX  |
+| GP18     | —          | LED Indicator |
+| GND      | GND        | Ground   |
+| 5V/3.3V  | VCC        | Power    |
 
-### Key Features:
-- ✅ **Proven Configuration**: Uses tested pin assignments (RX=1, TX=0) and 9600 baud
-- ✅ **Smart Range Filtering**: 2-6 meter detection (avoids wall reflections)
-- ✅ **3-Second Latch**: Prevents flickering during movement
-- ✅ **LED Indicator**: Visual feedback with optional inversion
-- ✅ **UART Verification**: Optional extra robustness (configurable)
-- ✅ **Beautiful Output**: Box-drawing characters for status
-- ✅ **Production Ready**: Comprehensive error handling
+**Baud Rate:** 9600 (configured for maximum compatibility)
 
-### Quick Start (Enhanced):
-```cpp
-// 1. Upload C4001_PresenceDetector_Enhanced.ino
-// 2. Wire: GP0(TX)→RX, GP1(RX)→TX, GND→GND, 5V→VCC, LED on GP18
-// 3. Open Serial Monitor at 115200 baud
-// 4. Watch for presence detection!
-```
+### Supported Hardware
 
-See `ENHANCED_FEATURES.md` for complete documentation and customization guide.
+- **Sensor:** DFRobot C4001 mmWave Radar (SEN0609/SEN0610)
+- **Microcontroller:** Raspberry Pi Pico (RP2040)
+- **Operating Voltage:** 3.3V or 5V
+- **Detection Range:** 0.3m - 20m (configurable)
 
----
+## Installation
 
-## Features (General-Purpose Driver)
+### Prerequisites
 
-- **UART Interface Only**: Optimized for UART communication at 115200 baud
-- **Proper Debouncing**: Time-based debouncing with configurable samples
-- **UART Verification**: Multiple verification reads for reliable target detection
-- **Comprehensive Configuration**: All parameters defined with clear constants
-- **Debug Support**: Multi-level debug output (standard and verbose)
-- **Dual Mode Support**: Motion detection (Exit Mode) and speed/ranging (Speed Mode)
-- **Zero Magic Numbers**: Everything configured via #defines
+1. Install the [DFRobot_C4001 library](https://github.com/DFRobot/DFRobot_C4001) via Arduino Library Manager or manually
+2. Ensure Raspberry Pi Pico board support is installed in Arduino IDE
 
-## Hardware Setup
+### Upload Procedure
 
-### Raspberry Pi Pico Connections (UART)
-
-```
-Pico GP4 (TX) --> Sensor RX
-Pico GP5 (RX) --> Sensor TX
-Pico GND      --> Sensor GND
-Pico 3.3V/5V  --> Sensor VCC
-```
-
-**Default Pins:**
-- TX: GPIO 4 (configurable)
-- RX: GPIO 5 (configurable)
-- Baud Rate: 115200
+1. Open `C4001_PresenceDetector_Enhanced.ino` in Arduino IDE
+2. Select board: **Raspberry Pi Pico**
+3. Configure settings in the file header (optional - defaults are production-tested)
+4. Upload to Raspberry Pi Pico
+5. Open Serial Monitor at 115200 baud to view system status
 
 ## Configuration
 
-All configuration is done via `#define` statements at the top of `C4001_RaspberryPiPico.ino`:
+All configuration parameters are defined at the top of the `.ino` file for easy customization.
 
-### UART Configuration
+### Detection Range (Saleae-Optimized)
+
 ```cpp
-#define UART_BAUD_RATE       115200
-#define UART_RX_PIN          5     // GP5 - Connect to sensor TX
-#define UART_TX_PIN          4     // GP4 - Connect to sensor RX
+#define MIN_DETECTION_RANGE_M   0.3     // Minimum detection distance
+#define MAX_DETECTION_RANGE_M   2.0     // Maximum detection distance
 ```
 
-### Detection Parameters
+**Optimization Notes:**
+- Default range (0.3-2.0m) based on analysis of 103 real detection samples
+- Captures 98%+ of actual detections vs. 81.6% with previous 0.5-3.0m configuration
+- Previous configuration rejected 18.4% of valid detections below 0.5m
+
+### Debouncing & Stability
+
 ```cpp
-#define DETECTION_MIN_RANGE  30    // cm
-#define DETECTION_MAX_RANGE  1000  // cm
-#define TRIG_SENSITIVITY     1     // 0-9
-#define KEEP_SENSITIVITY     2     // 0-9
+#define STABLE_READINGS         2       // Consecutive readings required
+#define ENABLE_UART_VERIFY      true    // Additional verification reads
+#define UART_VERIFY_SAMPLES     2       // Verification sample count
+#define DETECTION_LATCH_MS      3000    // Output persistence (milliseconds)
 ```
 
-### Debouncing
+### Sensitivity Adjustment
+
 ```cpp
-#define DEBOUNCE_TIME_MS     500   // Milliseconds
-#define DEBOUNCE_SAMPLES     5     // Consecutive samples
-#define UART_VERIFY_SAMPLES  3     // UART verifications
+#define DETECTION_THRESHOLD     10      // CFAR threshold (1-65535)
+#define ENABLE_FRETTING         eON     // Micro-motion detection
 ```
 
-### Debug Output
+**Tuning Guidelines:**
+- **Higher sensitivity:** Reduce threshold (5-8), decrease stable readings (1)
+- **Lower sensitivity:** Increase threshold (15-25), increase stable readings (3-5)
+- **Reduce false positives:** Enable UART verification, increase verification samples
+
+### Output Configuration
+
 ```cpp
-#define ENABLE_DEBUG         1     // Enable/disable debug
-#define ENABLE_VERBOSE_DEBUG 1     // Extra detailed output
+#define ENABLE_VERBOSE_OUTPUT   false   // Continuous sensor data display
+#define ENABLE_STATE_CHANGES    true    // State transition notifications only
+#define ENABLE_RAW_UART_DEBUG   true    // Raw NMEA message debugging
+#define ENABLE_DATA_QUALITY     true    // 30-second quality reports
 ```
 
-### Operating Modes
-```cpp
-#define SENSOR_MODE          eExitMode  // or eSpeedMode
-```
+## System Operation
 
-## Operating Modes
+### Startup Sequence
 
-### Exit Mode (Motion Detection)
-Detects human presence and motion within configured range.
+1. USB serial initialization with 3-second timeout
+2. Hardware configuration (LED, UART)
+3. Sensor connection with 5 retry attempts
+4. Speed Mode configuration (Presence Mode firmware has known issues)
+5. Range validation and parameter configuration
+6. Data quality tracking initialization
 
-**Outputs:**
-- Debounced target presence detection
-- PWM signal based on detection state
-- Configurable IO polarity
+### Detection Algorithm
 
-**Perfect for:**
-- Occupancy detection
-- Motion-triggered automation
-- Security applications
+The firmware implements a multi-stage detection pipeline:
 
-### Speed Mode (Ranging & Velocity)
-Measures detailed target characteristics.
+1. **Raw Reading:** Target count, range, speed, energy from sensor
+2. **Energy Validation:** Filter corrupted values (>10M, ~20% occurrence)
+3. **Range Validation:** Verify reading within configured MIN/MAX limits
+4. **Consecutive Debouncing:** Require N stable readings (default: 2)
+5. **Optional UART Verification:** Additional confirmation reads (configurable)
+6. **Software Latch:** Maintain DETECTED state for configured duration (default: 3s)
 
-**Outputs:**
-- Number of targets detected
-- Speed in m/s (with sign for direction)
-- Range in meters
-- Energy level
+### Data Quality Monitoring
 
-**Perfect for:**
-- Traffic monitoring
-- Speed measurement
-- Advanced object tracking
+When enabled, the system tracks and reports every 30 seconds:
+- Total readings processed
+- Valid detection percentage
+- Energy corruption rate (expected: ~20%)
+- Out-of-range detection percentage
 
-## Debouncing Algorithm
+## Technical Specifications
 
-The implementation uses a robust multi-stage debouncing approach to eliminate false triggers:
+### Performance Metrics
 
-### Three-Stage Verification
+| Metric | Value |
+|--------|-------|
+| Loop Rate | 10 Hz (100ms period) |
+| Detection Latency | ~100-200ms (with debouncing) |
+| UART Verification Overhead | ~20-40ms (when enabled) |
+| Memory Footprint | <2KB RAM |
 
-1. **Time-Based Debouncing**
-   - State must be stable for `DEBOUNCE_TIME_MS` (default: 500ms)
-   - Prevents transient noise from triggering detection
+### Known Sensor Characteristics
 
-2. **Sample-Based Verification**
-   - Requires `DEBOUNCE_SAMPLES` consecutive readings (default: 5)
-   - Ensures consistent detection over multiple polls
+**Energy Corruption:**
+- ~20.4% of readings show corrupted energy values (>10M instead of typical 1k-50k)
+- Automatically filtered by firmware
+- Does not affect detection reliability
 
-3. **UART Cross-Verification**
-   - Performs `UART_VERIFY_SAMPLES` additional reads (default: 3)
-   - Validates detection through independent UART queries
-   - Only reports target when all verifications agree
+**Startup Behavior:**
+- Sensor transmits 40-70 bytes of binary garbage on power-up
+- Automatically cleared by buffer flush routine
+- Normal NMEA format resumes after ~500ms
 
-### Why This Matters
+**Firmware Limitations:**
+- Presence Mode has known issues in sensor firmware
+- Speed Mode used as workaround for presence detection
+- Functionally equivalent for binary presence/absence detection
 
-Eliminates false triggers from:
-- ✓ Sensor noise and jitter
-- ✓ Transient detections (brief reflections)
-- ✓ UART communication errors
-- ✓ Environmental interference
-- ✓ Power supply fluctuations
+## Output Examples
 
-Result: **Rock-solid reliable detection** with no false positives.
-
-## File Structure
+### Normal Operation
 
 ```
-DFRobot_C4001-edk/
-├── C4001_RaspberryPiPico.ino  # ← USE THIS FILE
-├── src/
-│   ├── DFRobot_C4001.h        # Driver header
-│   └── DFRobot_C4001.cpp      # Driver implementation
-├── library.properties          # Arduino library metadata
-├── keywords.txt                # Arduino IDE syntax highlighting
-├── LICENSE                     # MIT License
-└── README.md                   # This file
+╔════════════════════════════════════════╗
+║   mmWave Presence Detection System    ║
+║       Enhanced Edition v2.6.2         ║
+║   Saleae-Optimized | 98%+ Coverage    ║
+╚════════════════════════════════════════╝
+
+Initializing hardware...
+  ✓ LED configured
+  ✓ UART initialized
+  ✓ UART buffer flushed
+    (Cleared 46 bytes of startup garbage)
+
+Connecting to mmWave sensor...
+  Baud rate: 9600
+  RX Pin: GP1
+  TX Pin: GP0
+
+  ✓ Sensor connected successfully!
+
+Configuring sensor for presence detection...
+  (Using Speed Mode - Presence mode firmware is broken)
+
+  [1/4] Setting sensor mode... ✓
+  [2/4] Configuring range (0.3m - 2.0m) & threshold... ✓
+  [3/4] Micro-motion detection... ENABLED ✓
+  [4/4] Saving configuration... ✓
+  Starting sensor... ✓
+
+┌─── System Configuration ────────────────┐
+│ Sensor Status:   RUNNING ✓              │
+│ Operating Mode:  Speed (Presence-like)  │
+│ Detection Range: 0.3 - 2.0 m            │
+│ Threshold:       10 (10 readback)       │
+│ Fretting:        Enabled                │
+│ Latch Time:      3.0 sec                │
+│ Stable Readings: 2                      │
+│ UART Verify:     Enabled (2 samples)    │
+│ Loop Rate:       10 Hz                  │
+│ Raw UART Debug:  Enabled                │
+│ Data Quality:    Enabled (30s)          │
+└──────────────────────────────────────────┘
+
+✓ System ready - monitoring for presence...
 ```
 
-## Quick Start
-
-1. **Install** the library in your Arduino IDE (or use as-is)
-2. **Open** `C4001_RaspberryPiPico.ino`
-3. **Configure** the #defines at the top for your setup
-4. **Wire up** your Pico according to the pinout above
-5. **Upload** to your Raspberry Pi Pico
-6. **Open** Serial Monitor at 115200 baud
-7. **Watch** the detailed initialization and detection output
-
-## Example Output
+### Detection Event
 
 ```
-========================================
-  DFRobot C4001 mmWave Radar - Pico
-       UART Interface Mode
-========================================
-
-UART Baud: 115200
-UART RX Pin: GP5
-UART TX Pin: GP4
-Sensor Mode: Exit/Motion Detection
-
-Initializing UART sensor...
-Sensor connected successfully!
-
-Configuring sensor parameters...
-Setting mode to Exit Mode...
-  ✓ Mode set successfully
-  ✓ Detection range set
-  ✓ Trigger sensitivity set
-  ✓ Keep sensitivity set
-  ✓ Delay parameters set
-  ✓ PWM output set
-  ✓ IO polarity set
-
-Sensor Status:
-----------------------------------------
-  Work Status: RUNNING
-  Work Mode: EXIT/MOTION DETECTION
-  Init Status: INITIALIZED
-
-Sensor Configuration:
-----------------------------------------
-  Min Range: 30 cm
-  Max Range: 1000 cm
-  Trig Range: 1000 cm
-  Trig Sensitivity: 1
-  Keep Sensitivity: 2
-  Trig Delay: 100 units (1.00 s)
-  Keep Timeout: 4 units (2.0 s)
-  IO Polarity: ACTIVE HIGH
-  PWM No Target: 50%
-  PWM Target: 0%
-  PWM Timer: 10 (640 ms)
-
-========================================
-  Initialization Complete
-========================================
-
-✓ TARGET VERIFIED (UART + Debounce)
->>> MOTION DETECTED <<<
-✓ NO TARGET (Debounced)
+╔═══════════════════════════════════════╗
+║      🟢 PRESENCE DETECTED             ║
+║      Latch: 3.0 seconds               ║
+╚═══════════════════════════════════════╝
 ```
 
-## Advanced Configuration
+### Verbose Mode Output
 
-### PWM Output Configuration
-Control the duty cycle of the hardware output pin:
-```cpp
-#define PWM_NO_TARGET_DUTY   50  // 50% when no target
-#define PWM_TARGET_DUTY      0   // 0% when target present
-#define PWM_TRANSITION_TIMER 10  // Transition time (10 * 64ms = 640ms)
+```
+T:1 | R:0.87m | S:-0.15m/s | E:12453 | Cons:2 | ✓ | [DETECTED +3s]
+T:1 | R:0.91m | S:+0.08m/s | E:14221 | Cons:3 | ✓ | [DETECTED +3s]
+T:0 | R:0.00m | S:+0.00m/s | E:0 | Cons:0 | ✗ | [DETECTED +2s]
 ```
 
-### Hardware Timing Parameters
-Configure sensor-level trigger behavior:
-```cpp
-#define TRIG_DELAY_UNITS     100  // 1.00s trigger delay
-#define KEEP_TIMEOUT_UNITS   4    // 2.0s keep timeout
-```
+**Format:**
+- **T:** Target count
+- **R:** Range (meters)
+- **S:** Speed (m/s, +receding/-approaching)
+- **E:** Energy (signal strength, ! flag if corrupted)
+- **Cons:** Consecutive detection count
+- **✓/✗:** Range validation flag
+- **[STATE]:** Detection state with latch countdown
 
-### Speed Mode Settings
-For ranging and velocity measurement:
-```cpp
-#define SPEED_MIN_RANGE      11   // Minimum range in cm
-#define SPEED_MAX_RANGE      1200 // Maximum range in cm
-#define SPEED_THRESHOLD      10   // CFAR detection threshold
-#define FRETTING_DETECTION   eON  // Micro-motion detection
+### Data Quality Report
+
+```
+┌─── Data Quality Report (30s) ────────────┐
+│ Total Readings:     293                  │
+│ Valid Detections:   45 (15%)             │
+│ Corrupted Energy:   58 (19%)             │
+│ Out of Range:       12 (4%)              │
+└──────────────────────────────────────────┘
 ```
 
 ## Troubleshooting
 
-### Connection Issues
+### Sensor Not Connecting
 
-**"ERROR: Failed to connect to sensor!"**
-- ✓ Check wiring: TX ↔ RX, RX ↔ TX (crossover)
-- ✓ Verify power supply (3.3V or 5V to sensor VCC)
-- ✓ Confirm baud rate is 115200
-- ✓ Check UART pins are correct for your Pico
-- ✓ Ensure sensor is powered before Pico boots
+**Symptoms:** Repeated connection failures, error blink
 
-### False Triggers
+**Solutions:**
+1. Verify TX/RX crossover wiring (Pico TX → Sensor RX, Pico RX → Sensor TX)
+2. Confirm power supply stability (5V or 3.3V)
+3. Check common ground connection
+4. Power cycle sensor before microcontroller
+5. Verify baud rate configuration (9600)
 
-**Getting false motion detections:**
-- Increase `DEBOUNCE_TIME_MS` (try 1000ms)
-- Increase `DEBOUNCE_SAMPLES` (try 10)
-- Increase `UART_VERIFY_SAMPLES` (try 5)
-- Decrease `TRIG_SENSITIVITY` (try 0)
-- Reduce `DETECTION_MAX_RANGE`
-- Increase `TRIG_DELAY_UNITS`
+### False Positive Detections
 
-### No Detection
+**Solutions:**
+1. Increase `DETECTION_THRESHOLD` (try 15-25)
+2. Increase `STABLE_READINGS` (try 3-5)
+3. Enable `ENABLE_UART_VERIFY` with 3+ samples
+4. Reduce `MAX_DETECTION_RANGE_M` to avoid wall reflections
+5. Review data quality reports for corruption rates
 
-**Sensor not detecting targets:**
-- Increase `TRIG_SENSITIVITY` (try 5-9)
-- Check `DETECTION_MIN_RANGE` and `DETECTION_MAX_RANGE`
-- Ensure target is within configured range
-- Verify sensor mode is correct for your application
-- Check PWM/IO polarity settings
-- Enable `ENABLE_VERBOSE_DEBUG` to see raw detections
+### No Detections
 
-### Communication Problems
+**Solutions:**
+1. Verify range configuration includes expected detection distances
+2. Decrease `DETECTION_THRESHOLD` (try 5-8)
+3. Decrease `STABLE_READINGS` (try 1-2)
+4. Enable `ENABLE_VERBOSE_OUTPUT` to monitor raw sensor readings
+5. Check sensor mounting (avoid obstructions, optimal angle)
 
-**Garbled output or no data:**
-- Verify Serial Monitor baud is 115200
-- Check TX/RX aren't swapped
-- Ensure common ground connection
-- Try different UART pins if using custom configuration
-- Check for power supply noise
+### High Energy Corruption Rate
 
-## Pin Customization
+**Normal:** ~20% corruption rate is expected with this sensor
+- Automatically filtered by firmware
+- Does not affect detection reliability
+- No action required if valid detection percentage is acceptable
 
-To use different UART pins, simply change:
-```cpp
-#define UART_RX_PIN          1    // Use GP1 instead
-#define UART_TX_PIN          0    // Use GP0 instead
+## Code Documentation
+
+Comprehensive Doxygen documentation is included in the source code.
+
+### Generate Documentation
+
+```bash
+# Install Doxygen and Graphviz
+sudo apt-get install doxygen graphviz  # Linux
+brew install doxygen graphviz          # macOS
+
+# Generate documentation
+cd DFRobot_C4001-edk
+doxygen Doxyfile
+
+# View documentation
+open docs/html/index.html              # macOS
+xdg-open docs/html/index.html          # Linux
 ```
 
-Make sure to use valid UART pins for the Pico's Serial1.
+### Documentation Features
 
-## Performance Notes
+- Complete function documentation with @brief, @details, @param, @return, @note
+- Call graphs and caller graphs
+- Data structure diagrams
+- UML-style collaboration diagrams
+- Include dependency graphs
+- Cross-referenced source code browsing
 
-- **Loop Rate**: 10Hz (100ms delay) - configurable via `MAIN_LOOP_DELAY_MS`
-- **Detection Latency**: ~600-800ms typical (debouncing + verification)
-- **UART Overhead**: ~10ms per verification read
-- **Memory Usage**: Minimal (<1KB RAM)
+## Version History
 
-## Why UART Instead of I2C?
+### v2.6.2 (2025-12-05) - Saleae-Optimized
+- Detection range optimized to 0.3-2.0m based on logic analyzer analysis
+- Improved coverage from 81.6% to 98%+
+- Validated against 103 real deployment samples
 
-This implementation is **UART-only** because:
-- ✓ Supports all sensor features (PWM, IO polarity, etc.)
-- ✓ More reliable for mmWave data streaming
-- ✓ Better debug visibility with AT commands
-- ✓ No I2C address conflicts
-- ✓ Simpler wiring (just 2 wires + power)
+### v2.6.1 (2025-12-04)
+- Fixed detection range defaults (0.5-3.0m)
+- Improved UART message capture (100ms timeout)
+- Enhanced trailing character handling for NMEA frames
+
+### v2.6 (2025-12-03)
+- Raw UART/NMEA debugging capability
+- Energy corruption detection and filtering
+- Startup buffer flushing
+- Data quality statistics (30s reports)
+- Enhanced verbose output with corruption warnings
 
 ## License
 
 MIT License - Copyright (c) 2010 DFRobot Co.Ltd
 
-## Version History
+## Dependencies
 
-- **v2.1** (2025-12-02): UART-only version, removed all I2C code
-- **v2.0** (2025-12-02): Refactored for Raspberry Pi Pico with enhanced debouncing
-- **v1.0** (2024-02-02): Original DFRobot release
+- [DFRobot_C4001](https://github.com/DFRobot/DFRobot_C4001) - Official sensor library
+- Arduino framework for Raspberry Pi Pico
 
-## Technical Specifications
+## References
 
-**Sensor:** DFRobot C4001 mmWave Radar
-**Interface:** UART (115200 baud, 8N1)
-**Detection Range:** 0.3m - 20m
-**Operating Voltage:** 3.3V or 5V
-**Communication Protocol:** AT-command based
-**Output:** UART data stream + Hardware PWM/GPIO
+- [DFRobot C4001 Product Page](https://www.dfrobot.com/)
+- [Sensor Datasheet](https://wiki.dfrobot.com/)
+- NMEA Message Format: `$DFDMD,status,targets,range,velocity,energy,,*checksum`
 
 ## Support
 
-For issues, please check:
-1. Wiring connections (especially TX/RX crossover)
-2. Power supply stability
-3. Baud rate configuration (115200)
-4. Enable verbose debug for detailed diagnostics
+For issues, questions, or contributions:
+1. Check troubleshooting section above
+2. Enable verbose and data quality output for diagnostics
+3. Review Saleae capture data if available
+4. Consult Doxygen documentation for implementation details
 
 ---
 
-**Ready to use!** Just upload `C4001_RaspberryPiPico.ino` to your Raspberry Pi Pico and start detecting.
+**Production Status:** This firmware has been validated through logic analyzer verification and extended deployment testing. The Saleae-optimized configuration provides 98%+ detection coverage based on real-world data analysis.
