@@ -1,7 +1,7 @@
 /*!
  * @file    C4001_PresenceDetector_LCD_Final.ino
  * @brief   Enhanced mmWave Presence Detection - Pulse Mode + LCD
- * @version 2.8.0 - SPEED FILTER ADDED
+ * @version 2.8.1 - FIXED DISTANCE JUMP BUG
  */
 
 #include <DFRobot_C4001.h>
@@ -446,10 +446,10 @@ SensorReading readSensor(void) {
     reading.speedValid = (fabs(reading.targetSpeed) <= MAX_HUMAN_SPEED_MS);
     if (!reading.speedValid && reading.targetCount > 0) dataQuality.highSpeedRejections++;
 
-    // [Updated] Validity logic
-    reading.valid = (rangeValid && reading.speedValid);
+    // [Updated] Validity logic - includes range, speed, AND energy validation
+    reading.valid = (rangeValid && reading.speedValid && !reading.energyCorrupted);
 
-    if (reading.valid && reading.targetCount > 0 && !reading.energyCorrupted) {
+    if (reading.valid && reading.targetCount > 0) {
         dataQuality.validReadings++;
     }
 
@@ -491,8 +491,8 @@ DetectionState evaluateDetection(const SensorReading& reading) {
 
     // --- SCANNING PHASE ---
     bool hasTarget = (reading.targetCount > 0);
-    // Note: reading.valid now includes the speed check
-    bool validData = (hasTarget && reading.valid && !reading.energyCorrupted);
+    // Note: reading.valid now includes range, speed, AND energy validation
+    bool validData = (hasTarget && reading.valid);
 
     if (validData) {
         consecutiveDetections++;
@@ -552,15 +552,18 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
             lcd.print("Human Found!    ");
             
             lcd.setCursor(0, 1);
-            
+
             // SHOW DATA (CountDown Removed)
-            if (reading.targetCount > 0) {
+            // Only display if reading is valid (range, speed, and energy are all good)
+            if (reading.targetCount > 0 && reading.valid) {
                  lcd.print("R:");
                  lcd.print(reading.targetRange, 2);
-                 lcd.print("m E:"); 
+                 lcd.print("m E:");
                  lcd.print(reading.targetEnergy);
-                 lcd.print("    "); 
-            } 
+                 lcd.print("    ");
+            } else {
+                 lcd.print("                "); // Clear invalid data
+            }
             lastLcdUpdate = millis();
         }
     }
@@ -573,13 +576,16 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
             lcd.print("Motion Detected ");
             
             lcd.setCursor(0, 1);
-            if (reading.targetCount > 0) {
+            // Only display if reading is valid (range, speed, and energy are all good)
+            if (reading.targetCount > 0 && reading.valid) {
                  lcd.print("R:");
                  lcd.print(reading.targetRange, 2);
-                 lcd.print("m E:"); 
+                 lcd.print("m E:");
                  lcd.print(reading.targetEnergy);
-                 lcd.print("    "); 
-            } 
+                 lcd.print("    ");
+            } else {
+                 lcd.print("                "); // Clear invalid data
+            }
             lastLcdUpdate = millis();
         }
     }
@@ -607,7 +613,7 @@ void errorBlinkLED(void) {
 void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
-    Serial.println(F("║   mmWave Presence - Pulse Mode v2.8.0  ║"));
+    Serial.println(F("║   mmWave Presence - Pulse Mode v2.8.1  ║"));
     Serial.println(F("║      with Gravity LCD1602 RGB          ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
