@@ -18,7 +18,7 @@
 #define PIN_MOTION_INPUT        22      // GP22 - Connect to sensor "OUT" pin
 
 // --- LCD Configuration ---
-[cite_start]// Default I2C address for DFRobot RGB LCD is LCD:0x2D, RGB:0x3E [cite: 5]
+// Default I2C address for DFRobot RGB LCD is LCD:0x2D, RGB:0x3E
 DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 
 // --- LED Behavior ---
