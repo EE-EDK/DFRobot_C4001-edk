@@ -1,7 +1,7 @@
 /*!
- * @file    C4001_PresenceDetector_LCD_Pulse.ino
+ * @file    C4001_PresenceDetector_LCD_Final.ino
  * @brief   Enhanced mmWave Presence Detection - Pulse Mode + LCD
- * @version 2.7.2 - SHOW STRENGTH ON MOTION
+ * @version 2.7.4 - NO COUNTDOWN, DATA ONLY
  */
 
 #include <DFRobot_C4001.h>
@@ -37,17 +37,17 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // DETECTION RANGE CONFIGURATION (meters)
 // ============================================================================
 
-#define MIN_DETECTION_RANGE_M   1.0     
-#define MAX_DETECTION_RANGE_M   10.0     
+#define MIN_DETECTION_RANGE_M   0.3     
+#define MAX_DETECTION_RANGE_M   2.0     
 
 // ============================================================================
 // DETECTION BEHAVIOR CONFIGURATION
 // ============================================================================
 
-#define DETECTION_THRESHOLD     20      // Lower = more sensitive
-#define STABLE_READINGS         3       
+#define DETECTION_THRESHOLD     10      // Lower = more sensitive
+#define STABLE_READINGS         2       
 #define ENABLE_UART_VERIFY      true    
-#define UART_VERIFY_SAMPLES     3       
+#define UART_VERIFY_SAMPLES     2       
 
 // --- Software Latch (One-Shot Pulse) ---
 #define DETECTION_LATCH_MS      3000    // Device stays ON for exactly this long
@@ -494,10 +494,10 @@ void updateLED(DetectionState state) {
 }
 
 /**
- * @brief Updated LCD Logic
+ * @brief Updated LCD Logic - Data Only (No Countdown)
  * @details 
- * White = Human Latch (Shows timer)
- * Green = Motion Detected (Shows Range & Strength/Energy)
+ * White = Human Latch (Shows Live Data if available)
+ * Green = Motion Detected (Shows Live Data)
  * Red   = Scanning
  */
 void updateLCD(const SensorReading& reading, DetectionState state) {
@@ -518,14 +518,16 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
             lcd.setCursor(0, 0);
             lcd.print("Human Found!    ");
             
-            // Calculate remaining latch time
-            unsigned long remaining = (DETECTION_LATCH_MS - (millis() - lastDetectionTime)) / 1000;
-            
             lcd.setCursor(0, 1);
-            lcd.print("Pulse Active: ");
-            lcd.print(remaining);
-            lcd.print("s ");
             
+            // SHOW DATA (CountDown Removed)
+            if (reading.targetCount > 0) {
+                 lcd.print("R:");
+                 lcd.print(reading.targetRange, 2);
+                 lcd.print("m E:"); 
+                 lcd.print(reading.targetEnergy);
+                 lcd.print("    "); 
+            }        
             lastLcdUpdate = millis();
         }
     }
@@ -538,16 +540,13 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
             lcd.print("Motion Detected ");
             
             lcd.setCursor(0, 1);
-            // NEW: Show Data instead of "Analyzing..."
             if (reading.targetCount > 0) {
                  lcd.print("R:");
                  lcd.print(reading.targetRange, 2);
-                 lcd.print("m E:"); // E for Energy/Strength
+                 lcd.print("m E:"); 
                  lcd.print(reading.targetEnergy);
-                 lcd.print("    "); // Pad with spaces
-            } else {
-                 lcd.print("Acquiring...    ");
-            }
+                 lcd.print("    "); 
+            } 
             lastLcdUpdate = millis();
         }
     }
@@ -575,7 +574,7 @@ void errorBlinkLED(void) {
 void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
-    Serial.println(F("║   mmWave Presence - Pulse Mode v2.7.2  ║"));
+    Serial.println(F("║   mmWave Presence - Pulse Mode v2.7.4  ║"));
     Serial.println(F("║      with Gravity LCD1602 RGB          ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
