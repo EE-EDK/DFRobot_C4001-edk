@@ -1,12 +1,13 @@
 /*!
  * @file    C4001_PresenceDetector_LCD_Final.ino
  * @brief   Enhanced mmWave Presence Detection - Pulse Mode + LCD
- * @version 2.7.4 - NO COUNTDOWN, DATA ONLY
+ * @version 2.8.0 - SPEED FILTER ADDED
  */
 
 #include <DFRobot_C4001.h>
 #include <Wire.h>                // Required for I2C LCD
 #include "DFRobot_RGBLCD1602.h"  // DFRobot Gravity LCD Library
+#include <math.h>                // [Added] Required for fabs() speed calc
 
 // ============================================================================
 // HARDWARE CONFIGURATION
@@ -34,11 +35,14 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 #define SERIAL_TIMEOUT_MS       3000    
 
 // ============================================================================
-// DETECTION RANGE CONFIGURATION (meters)
+// DETECTION RANGE & SPEED CONFIGURATION
 // ============================================================================
 
 #define MIN_DETECTION_RANGE_M   1.0     
-#define MAX_DETECTION_RANGE_M   10.0     
+#define MAX_DETECTION_RANGE_M   10.0    
+
+// [Added] Speed Filter
+#define MAX_HUMAN_SPEED_MS      7.0     // Filter out targets moving faster than 7m/s
 
 // ============================================================================
 // DETECTION BEHAVIOR CONFIGURATION
@@ -103,6 +107,7 @@ struct SensorReading {
     uint32_t targetEnergy;
     bool valid;
     bool energyCorrupted;
+    bool speedValid; // [Added] New Flag
 };
 
 struct DataQuality {
@@ -110,6 +115,7 @@ struct DataQuality {
     uint32_t validReadings;
     uint32_t corruptedEnergy;
     uint32_t outOfRange;
+    uint32_t highSpeedRejections; // [Added] New Counter
     uint32_t detectionCount;
     unsigned long lastReportTime;
 };
@@ -126,7 +132,7 @@ uint32_t rawUartCounter = 0;
 unsigned long lastMotionTime = 0;
 
 // Data quality tracking
-DataQuality dataQuality = {0, 0, 0, 0, 0, 0};
+DataQuality dataQuality = {0, 0, 0, 0, 0, 0, 0};
 
 // ============================================================================
 // FUNCTION PROTOTYPES
@@ -407,12 +413,19 @@ void showConfigSummary(void) {
     Serial.print(F("-"));
     Serial.print(MAX_DETECTION_RANGE_M, 1);
     Serial.println(F("m                │"));
+    // [Added] Show Speed Config
+    Serial.print(F("│ Max Speed:       "));
+    Serial.print(MAX_HUMAN_SPEED_MS, 1);
+    Serial.println(F(" m/s               │"));
     Serial.print(F("│ Startup Buffer:  "));
     Serial.print(STARTUP_BUFFER_MS / 1000);
     Serial.println(F(" sec                 │"));
     Serial.println(F("└─────────────────────────────────────────┘"));
 }
 
+/**
+ * @brief Reads sensor data and applies SPEED FILTER
+ */
 SensorReading readSensor(void) {
     SensorReading reading;
     reading.targetCount = radarSensor.getTargetNumber();
@@ -424,24 +437,43 @@ SensorReading readSensor(void) {
     reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY);
     if (reading.energyCorrupted) dataQuality.corruptedEnergy++;
 
-    reading.valid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
-                     reading.targetRange <= MAX_DETECTION_RANGE_M);
-    
-    if (!reading.valid && reading.targetCount > 0) dataQuality.outOfRange++;
-    if (reading.valid && reading.targetCount > 0 && !reading.energyCorrupted) dataQuality.validReadings++;
+    // Range Check
+    bool rangeValid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
+                       reading.targetRange <= MAX_DETECTION_RANGE_M);
+    if (!rangeValid && reading.targetCount > 0) dataQuality.outOfRange++;
+
+    // [Added] Speed Check
+    reading.speedValid = (fabs(reading.targetSpeed) <= MAX_HUMAN_SPEED_MS);
+    if (!reading.speedValid && reading.targetCount > 0) dataQuality.highSpeedRejections++;
+
+    // [Updated] Validity logic
+    reading.valid = (rangeValid && reading.speedValid);
+
+    if (reading.valid && reading.targetCount > 0 && !reading.energyCorrupted) {
+        dataQuality.validReadings++;
+    }
 
     return reading;
 }
 
+/**
+ * @brief Verifies detection with extra UART reads, applying SPEED FILTER
+ */
 bool verifyDetectionUART(void) {
     uint8_t verifiedCount = 0;
     for (uint8_t i = 0; i < UART_VERIFY_SAMPLES; i++) {
         delay(10);
         uint8_t targetCount = radarSensor.getTargetNumber();
         float targetRange = radarSensor.getTargetRange();
+        float targetSpeed = radarSensor.getTargetSpeed(); // [Added] Read speed
+        
         bool validRange = (targetRange >= MIN_DETECTION_RANGE_M &&
                           targetRange <= MAX_DETECTION_RANGE_M);
-        if (targetCount > 0 && validRange) {
+        
+        // [Added] Check Speed in Verification
+        bool validSpeed = (fabs(targetSpeed) <= MAX_HUMAN_SPEED_MS);
+
+        if (targetCount > 0 && validRange && validSpeed) {
             verifiedCount++;
         }
     }
@@ -459,6 +491,7 @@ DetectionState evaluateDetection(const SensorReading& reading) {
 
     // --- SCANNING PHASE ---
     bool hasTarget = (reading.targetCount > 0);
+    // Note: reading.valid now includes the speed check
     bool validData = (hasTarget && reading.valid && !reading.energyCorrupted);
 
     if (validData) {
@@ -527,7 +560,7 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
                  lcd.print("m E:"); 
                  lcd.print(reading.targetEnergy);
                  lcd.print("    "); 
-            }        
+            } 
             lastLcdUpdate = millis();
         }
     }
@@ -574,7 +607,7 @@ void errorBlinkLED(void) {
 void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
-    Serial.println(F("║   mmWave Presence - Pulse Mode v2.7.4  ║"));
+    Serial.println(F("║   mmWave Presence - Pulse Mode v2.8.0  ║"));
     Serial.println(F("║      with Gravity LCD1602 RGB          ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
@@ -652,10 +685,14 @@ void printDataQualityReport(void) {
     Serial.print(F(" Corrupt="));
     Serial.print(dataQuality.corruptedEnergy);
     Serial.print(F(" OutRange="));
-    Serial.println(dataQuality.outOfRange);
+    Serial.print(dataQuality.outOfRange);
+    // [Added] Print Speed Rejections
+    Serial.print(F(" HighSpeedRejections="));
+    Serial.println(dataQuality.highSpeedRejections);
     
     dataQuality.totalReadings = 0;
     dataQuality.validReadings = 0;
     dataQuality.corruptedEnergy = 0;
     dataQuality.outOfRange = 0;
+    dataQuality.highSpeedRejections = 0;
 }
