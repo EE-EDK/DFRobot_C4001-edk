@@ -51,10 +51,10 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // DETECTION BEHAVIOR CONFIGURATION
 // ============================================================================
 
-#define DETECTION_THRESHOLD     20      // Lower = more sensitive
+#define DETECTION_THRESHOLD     10      // Lower = more sensitive
 #define STABLE_READINGS         3       
 #define ENABLE_UART_VERIFY      true    
-#define UART_VERIFY_SAMPLES     3       
+#define UART_VERIFY_SAMPLES     2       
 
 // --- Software Latch (One-Shot Pulse) ---
 #define DETECTION_LATCH_MS      3000    // Device stays ON for exactly this long
