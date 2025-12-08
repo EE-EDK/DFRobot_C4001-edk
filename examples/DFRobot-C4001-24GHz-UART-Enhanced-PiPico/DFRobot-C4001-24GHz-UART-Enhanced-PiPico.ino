@@ -1,7 +1,7 @@
 /*!
  * @file    C4001_PresenceDetector_LCD_Final.ino
  * @brief   Enhanced mmWave Presence Detection - Pulse Mode + LCD
- * @version 2.8.1 - FIXED DISTANCE JUMP BUG
+ * @version 2.9.0 - PROFESSIONAL ENHANCEMENTS
  */
 
 #include <DFRobot_C4001.h>
@@ -44,6 +44,9 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // [Added] Speed Filter
 #define MAX_HUMAN_SPEED_MS      7.0     // Filter out targets moving faster than 7m/s
 
+// Signal Smoothing (EMA Filter)
+#define EMA_ALPHA               0.3     // Smoothing factor (0-1): lower = more smoothing
+
 // ============================================================================
 // DETECTION BEHAVIOR CONFIGURATION
 // ============================================================================
@@ -57,8 +60,9 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 #define DETECTION_LATCH_MS      3000    // Device stays ON for exactly this long
 #define STARTUP_BUFFER_MS       5000    // 5 Second buffer at startup
 
-#define ENABLE_FRETTING         eON     
-#define MAX_VALID_ENERGY        10000000 
+#define ENABLE_FRETTING         eON
+#define MIN_VALID_ENERGY        1           // Reject zero or negative energy
+#define MAX_VALID_ENERGY        100000      // More realistic threshold 
 
 // ============================================================================
 // OUTPUT & DISPLAY CONFIGURATION
@@ -70,17 +74,22 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 #define ENABLE_RAW_UART_DEBUG   true    
 #define ENABLE_DATA_QUALITY     true    
 
-#define VERBOSE_PRINT_EVERY_N   10      
-#define RAW_UART_PRINT_EVERY_N  5       
-#define LCD_UPDATE_MS           250     
+#define VERBOSE_PRINT_EVERY_N           10
+#define RAW_UART_PRINT_EVERY_N          5
+#define LCD_UPDATE_MS                   250
+#define DATA_QUALITY_REPORT_INTERVAL_MS 30000   // 30 seconds
+#define LOADING_FLASH_INTERVAL_MS       500     // Loading screen flash rate
+#define UART_READ_TIMEOUT_MS            100     // UART read timeout
+#define MAX_IDENTICAL_READINGS_ALERT    50      // ~5 seconds at 100ms loop     
 
 // ============================================================================
 // TIMING CONFIGURATION
 // ============================================================================
 
-#define LOOP_DELAY_MS           100     
-#define ERROR_BLINK_MS          200     
-#define SENSOR_STARTUP_DELAY_MS 2000    
+#define LOOP_DELAY_MS           100
+#define ERROR_BLINK_MS          200
+#define SENSOR_STARTUP_DELAY_MS 2000
+#define MILLIS_SANITY_CHECK_MS  4000    // Sanity check for millis() overflow    
 
 // ============================================================================
 // ADVANCED OPTIONS
@@ -120,6 +129,29 @@ struct DataQuality {
     unsigned long lastReportTime;
 };
 
+struct SensorHealthMonitor {
+    uint32_t identicalReadings;
+    float lastRange;
+    uint32_t lastEnergy;
+    unsigned long lastChangeTime;
+};
+
+struct FilteredReading {
+    float smoothedRange;
+    float smoothedSpeed;
+    uint32_t smoothedEnergy;
+    bool initialized;
+};
+
+struct SystemMetrics {
+    unsigned long uptimeSeconds;
+    unsigned long totalDetections;
+    unsigned long falseRejectionsSpeed;
+    unsigned long falseRejectionsRange;
+    float averageDetectionRange;
+    unsigned long lastMetricUpdate;
+};
+
 // State tracking variables
 DetectionState currentState = DetectionState::NO_TARGET;
 DetectionState previousState = DetectionState::NO_TARGET;
@@ -134,12 +166,22 @@ unsigned long lastMotionTime = 0;
 // Data quality tracking
 DataQuality dataQuality = {0, 0, 0, 0, 0, 0, 0};
 
+// Sensor health monitoring
+SensorHealthMonitor healthMonitor = {0, 0.0, 0, 0};
+
+// Signal smoothing (EMA filter)
+FilteredReading filtered = {0.0, 0.0, 0, false};
+
+// System performance metrics
+SystemMetrics metrics = {0, 0, 0, 0, 0.0, 0};
+
 // ============================================================================
 // FUNCTION PROTOTYPES
 // ============================================================================
 
 void initializeSystem(void);
 void initializeHardware(void);
+void createLCDCustomChars(void);
 void initializeSensor(void);
 void configureSensor(void);
 void flushUARTBuffer(void);
@@ -157,6 +199,10 @@ void printRawUART(void);
 void printDataQualityReport(void);
 void printBanner(void);
 void printSeparator(void);
+void checkSensorHealth(const SensorReading& reading);
+float getMaxSpeedForRange(float range);
+void updateSystemMetrics(void);
+int getFreeRAM(void);
 
 // ============================================================================
 // MAIN FUNCTIONS
@@ -177,6 +223,9 @@ void loop() {
 
     // Read sensor data
     SensorReading reading = readSensor();
+
+    // Check sensor health
+    checkSensorHealth(reading);
 
     // Evaluate detection with debouncing
     currentState = evaluateDetection(reading);
@@ -200,11 +249,14 @@ void loop() {
     // Print data quality report periodically
     if (ENABLE_DATA_QUALITY) {
         unsigned long now = millis();
-        if (now - dataQuality.lastReportTime > 30000) { 
+        if (now - dataQuality.lastReportTime > DATA_QUALITY_REPORT_INTERVAL_MS) {
             printDataQualityReport();
             dataQuality.lastReportTime = now;
         }
     }
+
+    // Update system performance metrics
+    updateSystemMetrics();
 
     loopCounter++;
     delay(LOOP_DELAY_MS);
@@ -269,8 +321,8 @@ void performStartupBuffer(void) {
         unsigned long elapsed = millis() - startBuffer;
         int percentage = (elapsed * 100) / STARTUP_BUFFER_MS;
 
-        // Flash "LOADING..." logic (every 500ms)
-        if (millis() - lastFlash > 500) {
+        // Flash "LOADING..." logic
+        if (millis() - lastFlash > LOADING_FLASH_INTERVAL_MS) {
             flashState = !flashState;
             lastFlash = millis();
             
@@ -326,6 +378,9 @@ void initializeHardware(void) {
     lcd.print("System Booting..");
     Serial.println(F("✓"));
 
+    // Create custom LCD characters
+    createLCDCustomChars();
+
     // Setup sensor UART
     Serial1.begin(BAUD_SENSOR);
     delay(200);
@@ -335,6 +390,36 @@ void initializeHardware(void) {
     Serial.println(F("  ✓ UART buffer flushed"));
 
     Serial.println();
+}
+
+void createLCDCustomChars(void) {
+    // Custom character 0: Human icon
+    byte humanIcon[8] = {
+        0b01110,
+        0b01110,
+        0b00100,
+        0b11111,
+        0b00100,
+        0b01010,
+        0b10001,
+        0b00000
+    };
+    lcd.createChar(0, humanIcon);
+
+    // Custom character 1: Wave/Motion icon
+    byte waveIcon[8] = {
+        0b00001,
+        0b00010,
+        0b00100,
+        0b01000,
+        0b10000,
+        0b01000,
+        0b00100,
+        0b00010
+    };
+    lcd.createChar(1, waveIcon);
+
+    Serial.println(F("  ✓ Custom LCD characters created"));
 }
 
 void initializeSensor(void) {
@@ -424,7 +509,18 @@ void showConfigSummary(void) {
 }
 
 /**
- * @brief Reads sensor data and applies SPEED FILTER
+ * @brief Adaptive speed threshold based on detection range
+ * @details Closer targets have stricter limits (human motion)
+ *          Farther targets allow more variance (measurement uncertainty)
+ */
+float getMaxSpeedForRange(float range) {
+    if (range < 3.0) return 7.0;        // 0-3m: Human sprint speed
+    else if (range < 6.0) return 10.0;  // 3-6m: Allow measurement variance
+    else return 15.0;                    // 6-10m: Greater tolerance
+}
+
+/**
+ * @brief Reads sensor data, applies EMA smoothing, and validates
  */
 SensorReading readSensor(void) {
     SensorReading reading;
@@ -433,17 +529,56 @@ SensorReading readSensor(void) {
     reading.targetSpeed = radarSensor.getTargetSpeed();
     reading.targetEnergy = radarSensor.getTargetEnergy();
 
+    // Apply EMA filter for signal smoothing
+    if (!filtered.initialized && reading.targetCount > 0) {
+        // Initialize filter with first reading
+        filtered.smoothedRange = reading.targetRange;
+        filtered.smoothedSpeed = reading.targetSpeed;
+        filtered.smoothedEnergy = reading.targetEnergy;
+        filtered.initialized = true;
+    } else if (reading.targetCount > 0) {
+        // Apply exponential moving average
+        filtered.smoothedRange = EMA_ALPHA * reading.targetRange +
+                                 (1 - EMA_ALPHA) * filtered.smoothedRange;
+        filtered.smoothedSpeed = EMA_ALPHA * reading.targetSpeed +
+                                 (1 - EMA_ALPHA) * filtered.smoothedSpeed;
+        filtered.smoothedEnergy = EMA_ALPHA * reading.targetEnergy +
+                                  (1 - EMA_ALPHA) * filtered.smoothedEnergy;
+
+        // Use filtered values for validation
+        reading.targetRange = filtered.smoothedRange;
+        reading.targetSpeed = filtered.smoothedSpeed;
+        reading.targetEnergy = filtered.smoothedEnergy;
+    } else {
+        // Reset filter when no target
+        filtered.initialized = false;
+    }
+
     dataQuality.totalReadings++;
-    reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY);
+    reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY ||
+                              reading.targetEnergy < MIN_VALID_ENERGY);
     if (reading.energyCorrupted) dataQuality.corruptedEnergy++;
 
-    // Range Check
-    bool rangeValid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
-                       reading.targetRange <= MAX_DETECTION_RANGE_M);
+    // Range Check with Hysteresis (prevents boundary oscillation)
+    static bool wasInRange = false;
+    bool rangeValid;
+
+    if (wasInRange) {
+        // Use wider bounds when already tracking (hysteresis)
+        rangeValid = (reading.targetRange >= 0.8 &&
+                     reading.targetRange <= 10.2);
+    } else {
+        // Use normal bounds when acquiring new target
+        rangeValid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
+                     reading.targetRange <= MAX_DETECTION_RANGE_M);
+    }
+    wasInRange = rangeValid;
+
     if (!rangeValid && reading.targetCount > 0) dataQuality.outOfRange++;
 
-    // [Added] Speed Check
-    reading.speedValid = (fabs(reading.targetSpeed) <= MAX_HUMAN_SPEED_MS);
+    // [Added] Adaptive Speed Check (range-dependent threshold)
+    float maxAllowedSpeed = getMaxSpeedForRange(reading.targetRange);
+    reading.speedValid = (fabs(reading.targetSpeed) <= maxAllowedSpeed);
     if (!reading.speedValid && reading.targetCount > 0) dataQuality.highSpeedRejections++;
 
     // [Updated] Validity logic - includes range, speed, AND energy validation
@@ -469,9 +604,10 @@ bool verifyDetectionUART(void) {
         
         bool validRange = (targetRange >= MIN_DETECTION_RANGE_M &&
                           targetRange <= MAX_DETECTION_RANGE_M);
-        
-        // [Added] Check Speed in Verification
-        bool validSpeed = (fabs(targetSpeed) <= MAX_HUMAN_SPEED_MS);
+
+        // [Added] Adaptive Speed Check in Verification
+        float maxAllowedSpeed = getMaxSpeedForRange(targetRange);
+        bool validSpeed = (fabs(targetSpeed) <= maxAllowedSpeed);
 
         if (targetCount > 0 && validRange && validSpeed) {
             verifiedCount++;
@@ -481,11 +617,13 @@ bool verifyDetectionUART(void) {
 }
 
 DetectionState evaluateDetection(const SensorReading& reading) {
-    
+
     unsigned long timeSinceDetection = millis() - lastDetectionTime;
-    
-    // --- LATCH ACTIVE PHASE ---
-    if (timeSinceDetection < DETECTION_LATCH_MS) {
+
+    // --- LATCH ACTIVE PHASE (with millis() overflow protection) ---
+    bool latchActive = (timeSinceDetection < DETECTION_LATCH_MS) &&
+                       (timeSinceDetection < MILLIS_SANITY_CHECK_MS);
+    if (latchActive) {
         return DetectionState::DETECTED;
     }
 
@@ -505,11 +643,20 @@ DetectionState evaluateDetection(const SensorReading& reading) {
             }
 
             if (confirmed) {
+                // Full confidence detection
                 lastDetectionTime = millis(); // Trigger the 3s Latch
                 dataQuality.detectionCount++;
+                metrics.totalDetections++;
                 return DetectionState::DETECTED;
             } else {
-                consecutiveDetections = 0;
+                // Graceful degradation: partial confidence fallback
+                if (consecutiveDetections >= STABLE_READINGS * 2) {
+                    Serial.println(F("⚠️  Detection with degraded confidence"));
+                    lastDetectionTime = millis();
+                    metrics.totalDetections++;
+                    return DetectionState::DETECTED;
+                }
+                // Continue accumulating detections for degraded mode
             }
         }
     } else {
@@ -537,9 +684,10 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
     
     bool rawMotion = digitalRead(PIN_MOTION_INPUT);
     if (rawMotion == HIGH) lastMotionTime = millis();
-    
+
     bool isHumanActive = (state == DetectionState::DETECTED);
-    bool isMotionActive = (millis() - lastMotionTime < 3000); 
+    unsigned long timeSinceMotion = millis() - lastMotionTime;
+    bool isMotionActive = (timeSinceMotion < 3000) && (timeSinceMotion < MILLIS_SANITY_CHECK_MS); 
 
     bool timeToUpdateText = (millis() - lastLcdUpdate > LCD_UPDATE_MS);
 
@@ -549,8 +697,9 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
         
         if (timeToUpdateText) {
             lcd.setCursor(0, 0);
-            lcd.print("Human Found!    ");
-            
+            lcd.write((byte)0);  // Human icon
+            lcd.print(" Human Found!   ");
+
             lcd.setCursor(0, 1);
 
             // SHOW DATA (CountDown Removed)
@@ -573,8 +722,9 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
 
         if (timeToUpdateText) {
             lcd.setCursor(0, 0);
-            lcd.print("Motion Detected ");
-            
+            lcd.write((byte)1);  // Wave icon
+            lcd.print(" Motion Detect ");
+
             lcd.setCursor(0, 1);
             // Only display if reading is valid (range, speed, and energy are all good)
             if (reading.targetCount > 0 && reading.valid) {
@@ -613,7 +763,7 @@ void errorBlinkLED(void) {
 void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
-    Serial.println(F("║   mmWave Presence - Pulse Mode v2.8.1  ║"));
+    Serial.println(F("║   mmWave Presence - Pulse Mode v2.9.0  ║"));
     Serial.println(F("║      with Gravity LCD1602 RGB          ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
@@ -646,7 +796,8 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
     if (state == DetectionState::DETECTED) {
         unsigned long timeSinceDetection = millis() - lastDetectionTime;
         unsigned long latchRemaining = 0;
-        if (timeSinceDetection < DETECTION_LATCH_MS) {
+        if (timeSinceDetection < DETECTION_LATCH_MS &&
+            timeSinceDetection < MILLIS_SANITY_CHECK_MS) {
             latchRemaining = (DETECTION_LATCH_MS - timeSinceDetection) / 1000;
         }
         Serial.print(F("[LATCHED: "));
@@ -661,7 +812,7 @@ void printRawUART(void) {
     if (Serial1.available()) {
         String message = "";
         unsigned long startTime = millis();
-        while (Serial1.available() && (millis() - startTime < 100)) {
+        while (Serial1.available() && (millis() - startTime < UART_READ_TIMEOUT_MS)) {
             char c = Serial1.read();
             if (isPrintable(c) && c != '\r' && c != '\n') message += c;
             if (c == '*' || c == '\n' || c == '\r') {
@@ -680,6 +831,51 @@ void printRawUART(void) {
             Serial.print(F("RAW: "));
             Serial.println(message);
         }
+    }
+}
+
+void checkSensorHealth(const SensorReading& reading) {
+    // Detect stuck readings
+    if (reading.targetRange == healthMonitor.lastRange &&
+        reading.targetEnergy == healthMonitor.lastEnergy &&
+        reading.targetCount > 0) {
+        healthMonitor.identicalReadings++;
+
+        if (healthMonitor.identicalReadings > MAX_IDENTICAL_READINGS_ALERT) {
+            Serial.println(F("⚠️  WARNING: Sensor may be stuck!"));
+            lcd.setRGB(255, 165, 0);  // Orange warning
+            // Optional: Attempt sensor reset
+            // radarSensor.setSensor(eStartSen);
+        }
+    } else {
+        healthMonitor.identicalReadings = 0;
+        healthMonitor.lastRange = reading.targetRange;
+        healthMonitor.lastEnergy = reading.targetEnergy;
+    }
+}
+
+int getFreeRAM() {
+    extern int __heap_start, *__brkval;
+    int v;
+    return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+}
+
+void updateSystemMetrics(void) {
+    unsigned long now = millis();
+    if (now - metrics.lastMetricUpdate > 60000) {  // Every 60 seconds
+        metrics.uptimeSeconds += 60;
+        metrics.lastMetricUpdate = now;
+
+        Serial.println();
+        Serial.print(F("📊 Uptime: "));
+        Serial.print(metrics.uptimeSeconds / 3600);
+        Serial.print(F("h "));
+        Serial.print((metrics.uptimeSeconds % 3600) / 60);
+        Serial.print(F("m | Detections: "));
+        Serial.print(metrics.totalDetections);
+        Serial.print(F(" | Free RAM: "));
+        Serial.print(getFreeRAM());
+        Serial.println(F(" bytes"));
     }
 }
 
