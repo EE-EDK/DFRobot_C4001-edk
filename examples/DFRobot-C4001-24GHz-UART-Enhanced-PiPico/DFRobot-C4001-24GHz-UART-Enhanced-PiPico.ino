@@ -44,6 +44,9 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // [Added] Speed Filter
 #define MAX_HUMAN_SPEED_MS      7.0     // Filter out targets moving faster than 7m/s
 
+// Signal Smoothing (EMA Filter)
+#define EMA_ALPHA               0.3     // Smoothing factor (0-1): lower = more smoothing
+
 // ============================================================================
 // DETECTION BEHAVIOR CONFIGURATION
 // ============================================================================
@@ -133,6 +136,13 @@ struct SensorHealthMonitor {
     unsigned long lastChangeTime;
 };
 
+struct FilteredReading {
+    float smoothedRange;
+    float smoothedSpeed;
+    uint32_t smoothedEnergy;
+    bool initialized;
+};
+
 // State tracking variables
 DetectionState currentState = DetectionState::NO_TARGET;
 DetectionState previousState = DetectionState::NO_TARGET;
@@ -149,6 +159,9 @@ DataQuality dataQuality = {0, 0, 0, 0, 0, 0, 0};
 
 // Sensor health monitoring
 SensorHealthMonitor healthMonitor = {0, 0.0, 0, 0};
+
+// Signal smoothing (EMA filter)
+FilteredReading filtered = {0.0, 0.0, 0, false};
 
 // ============================================================================
 // FUNCTION PROTOTYPES
@@ -174,6 +187,7 @@ void printDataQualityReport(void);
 void printBanner(void);
 void printSeparator(void);
 void checkSensorHealth(const SensorReading& reading);
+float getMaxSpeedForRange(float range);
 
 // ============================================================================
 // MAIN FUNCTIONS
@@ -444,7 +458,18 @@ void showConfigSummary(void) {
 }
 
 /**
- * @brief Reads sensor data and applies SPEED FILTER
+ * @brief Adaptive speed threshold based on detection range
+ * @details Closer targets have stricter limits (human motion)
+ *          Farther targets allow more variance (measurement uncertainty)
+ */
+float getMaxSpeedForRange(float range) {
+    if (range < 3.0) return 7.0;        // 0-3m: Human sprint speed
+    else if (range < 6.0) return 10.0;  // 3-6m: Allow measurement variance
+    else return 15.0;                    // 6-10m: Greater tolerance
+}
+
+/**
+ * @brief Reads sensor data, applies EMA smoothing, and validates
  */
 SensorReading readSensor(void) {
     SensorReading reading;
@@ -453,18 +478,56 @@ SensorReading readSensor(void) {
     reading.targetSpeed = radarSensor.getTargetSpeed();
     reading.targetEnergy = radarSensor.getTargetEnergy();
 
+    // Apply EMA filter for signal smoothing
+    if (!filtered.initialized && reading.targetCount > 0) {
+        // Initialize filter with first reading
+        filtered.smoothedRange = reading.targetRange;
+        filtered.smoothedSpeed = reading.targetSpeed;
+        filtered.smoothedEnergy = reading.targetEnergy;
+        filtered.initialized = true;
+    } else if (reading.targetCount > 0) {
+        // Apply exponential moving average
+        filtered.smoothedRange = EMA_ALPHA * reading.targetRange +
+                                 (1 - EMA_ALPHA) * filtered.smoothedRange;
+        filtered.smoothedSpeed = EMA_ALPHA * reading.targetSpeed +
+                                 (1 - EMA_ALPHA) * filtered.smoothedSpeed;
+        filtered.smoothedEnergy = EMA_ALPHA * reading.targetEnergy +
+                                  (1 - EMA_ALPHA) * filtered.smoothedEnergy;
+
+        // Use filtered values for validation
+        reading.targetRange = filtered.smoothedRange;
+        reading.targetSpeed = filtered.smoothedSpeed;
+        reading.targetEnergy = filtered.smoothedEnergy;
+    } else {
+        // Reset filter when no target
+        filtered.initialized = false;
+    }
+
     dataQuality.totalReadings++;
     reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY ||
                               reading.targetEnergy < MIN_VALID_ENERGY);
     if (reading.energyCorrupted) dataQuality.corruptedEnergy++;
 
-    // Range Check
-    bool rangeValid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
-                       reading.targetRange <= MAX_DETECTION_RANGE_M);
+    // Range Check with Hysteresis (prevents boundary oscillation)
+    static bool wasInRange = false;
+    bool rangeValid;
+
+    if (wasInRange) {
+        // Use wider bounds when already tracking (hysteresis)
+        rangeValid = (reading.targetRange >= 0.8 &&
+                     reading.targetRange <= 10.2);
+    } else {
+        // Use normal bounds when acquiring new target
+        rangeValid = (reading.targetRange >= MIN_DETECTION_RANGE_M &&
+                     reading.targetRange <= MAX_DETECTION_RANGE_M);
+    }
+    wasInRange = rangeValid;
+
     if (!rangeValid && reading.targetCount > 0) dataQuality.outOfRange++;
 
-    // [Added] Speed Check
-    reading.speedValid = (fabs(reading.targetSpeed) <= MAX_HUMAN_SPEED_MS);
+    // [Added] Adaptive Speed Check (range-dependent threshold)
+    float maxAllowedSpeed = getMaxSpeedForRange(reading.targetRange);
+    reading.speedValid = (fabs(reading.targetSpeed) <= maxAllowedSpeed);
     if (!reading.speedValid && reading.targetCount > 0) dataQuality.highSpeedRejections++;
 
     // [Updated] Validity logic - includes range, speed, AND energy validation
@@ -490,9 +553,10 @@ bool verifyDetectionUART(void) {
         
         bool validRange = (targetRange >= MIN_DETECTION_RANGE_M &&
                           targetRange <= MAX_DETECTION_RANGE_M);
-        
-        // [Added] Check Speed in Verification
-        bool validSpeed = (fabs(targetSpeed) <= MAX_HUMAN_SPEED_MS);
+
+        // [Added] Adaptive Speed Check in Verification
+        float maxAllowedSpeed = getMaxSpeedForRange(targetRange);
+        bool validSpeed = (fabs(targetSpeed) <= maxAllowedSpeed);
 
         if (targetCount > 0 && validRange && validSpeed) {
             verifiedCount++;
