@@ -143,6 +143,15 @@ struct FilteredReading {
     bool initialized;
 };
 
+struct SystemMetrics {
+    unsigned long uptimeSeconds;
+    unsigned long totalDetections;
+    unsigned long falseRejectionsSpeed;
+    unsigned long falseRejectionsRange;
+    float averageDetectionRange;
+    unsigned long lastMetricUpdate;
+};
+
 // State tracking variables
 DetectionState currentState = DetectionState::NO_TARGET;
 DetectionState previousState = DetectionState::NO_TARGET;
@@ -163,12 +172,16 @@ SensorHealthMonitor healthMonitor = {0, 0.0, 0, 0};
 // Signal smoothing (EMA filter)
 FilteredReading filtered = {0.0, 0.0, 0, false};
 
+// System performance metrics
+SystemMetrics metrics = {0, 0, 0, 0, 0.0, 0};
+
 // ============================================================================
 // FUNCTION PROTOTYPES
 // ============================================================================
 
 void initializeSystem(void);
 void initializeHardware(void);
+void createLCDCustomChars(void);
 void initializeSensor(void);
 void configureSensor(void);
 void flushUARTBuffer(void);
@@ -188,6 +201,8 @@ void printBanner(void);
 void printSeparator(void);
 void checkSensorHealth(const SensorReading& reading);
 float getMaxSpeedForRange(float range);
+void updateSystemMetrics(void);
+int getFreeRAM(void);
 
 // ============================================================================
 // MAIN FUNCTIONS
@@ -239,6 +254,9 @@ void loop() {
             dataQuality.lastReportTime = now;
         }
     }
+
+    // Update system performance metrics
+    updateSystemMetrics();
 
     loopCounter++;
     delay(LOOP_DELAY_MS);
@@ -360,6 +378,9 @@ void initializeHardware(void) {
     lcd.print("System Booting..");
     Serial.println(F("✓"));
 
+    // Create custom LCD characters
+    createLCDCustomChars();
+
     // Setup sensor UART
     Serial1.begin(BAUD_SENSOR);
     delay(200);
@@ -369,6 +390,36 @@ void initializeHardware(void) {
     Serial.println(F("  ✓ UART buffer flushed"));
 
     Serial.println();
+}
+
+void createLCDCustomChars(void) {
+    // Custom character 0: Human icon
+    byte humanIcon[8] = {
+        0b01110,
+        0b01110,
+        0b00100,
+        0b11111,
+        0b00100,
+        0b01010,
+        0b10001,
+        0b00000
+    };
+    lcd.createChar(0, humanIcon);
+
+    // Custom character 1: Wave/Motion icon
+    byte waveIcon[8] = {
+        0b00001,
+        0b00010,
+        0b00100,
+        0b01000,
+        0b10000,
+        0b01000,
+        0b00100,
+        0b00010
+    };
+    lcd.createChar(1, waveIcon);
+
+    Serial.println(F("  ✓ Custom LCD characters created"));
 }
 
 void initializeSensor(void) {
@@ -592,11 +643,20 @@ DetectionState evaluateDetection(const SensorReading& reading) {
             }
 
             if (confirmed) {
+                // Full confidence detection
                 lastDetectionTime = millis(); // Trigger the 3s Latch
                 dataQuality.detectionCount++;
+                metrics.totalDetections++;
                 return DetectionState::DETECTED;
             } else {
-                consecutiveDetections = 0;
+                // Graceful degradation: partial confidence fallback
+                if (consecutiveDetections >= STABLE_READINGS * 2) {
+                    Serial.println(F("⚠️  Detection with degraded confidence"));
+                    lastDetectionTime = millis();
+                    metrics.totalDetections++;
+                    return DetectionState::DETECTED;
+                }
+                // Continue accumulating detections for degraded mode
             }
         }
     } else {
@@ -637,8 +697,9 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
         
         if (timeToUpdateText) {
             lcd.setCursor(0, 0);
-            lcd.print("Human Found!    ");
-            
+            lcd.write((byte)0);  // Human icon
+            lcd.print(" Human Found!   ");
+
             lcd.setCursor(0, 1);
 
             // SHOW DATA (CountDown Removed)
@@ -661,8 +722,9 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
 
         if (timeToUpdateText) {
             lcd.setCursor(0, 0);
-            lcd.print("Motion Detected ");
-            
+            lcd.write((byte)1);  // Wave icon
+            lcd.print(" Motion Detect ");
+
             lcd.setCursor(0, 1);
             // Only display if reading is valid (range, speed, and energy are all good)
             if (reading.targetCount > 0 && reading.valid) {
@@ -789,6 +851,31 @@ void checkSensorHealth(const SensorReading& reading) {
         healthMonitor.identicalReadings = 0;
         healthMonitor.lastRange = reading.targetRange;
         healthMonitor.lastEnergy = reading.targetEnergy;
+    }
+}
+
+int getFreeRAM() {
+    extern int __heap_start, *__brkval;
+    int v;
+    return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+}
+
+void updateSystemMetrics(void) {
+    unsigned long now = millis();
+    if (now - metrics.lastMetricUpdate > 60000) {  // Every 60 seconds
+        metrics.uptimeSeconds += 60;
+        metrics.lastMetricUpdate = now;
+
+        Serial.println();
+        Serial.print(F("📊 Uptime: "));
+        Serial.print(metrics.uptimeSeconds / 3600);
+        Serial.print(F("h "));
+        Serial.print((metrics.uptimeSeconds % 3600) / 60);
+        Serial.print(F("m | Detections: "));
+        Serial.print(metrics.totalDetections);
+        Serial.print(F(" | Free RAM: "));
+        Serial.print(getFreeRAM());
+        Serial.println(F(" bytes"));
     }
 }
 
