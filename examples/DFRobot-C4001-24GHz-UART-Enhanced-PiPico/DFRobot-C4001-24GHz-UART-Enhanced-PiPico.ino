@@ -1,7 +1,7 @@
 /*!
  * @file    C4001_PresenceDetector_LCD_Final.ino
  * @brief   Enhanced mmWave Presence Detection - Pulse Mode + LCD
- * @version 2.8.1 - FIXED DISTANCE JUMP BUG
+ * @version 2.9.0 - PROFESSIONAL ENHANCEMENTS
  */
 
 #include <DFRobot_C4001.h>
@@ -57,8 +57,9 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 #define DETECTION_LATCH_MS      3000    // Device stays ON for exactly this long
 #define STARTUP_BUFFER_MS       5000    // 5 Second buffer at startup
 
-#define ENABLE_FRETTING         eON     
-#define MAX_VALID_ENERGY        10000000 
+#define ENABLE_FRETTING         eON
+#define MIN_VALID_ENERGY        1           // Reject zero or negative energy
+#define MAX_VALID_ENERGY        100000      // More realistic threshold 
 
 // ============================================================================
 // OUTPUT & DISPLAY CONFIGURATION
@@ -70,17 +71,22 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 #define ENABLE_RAW_UART_DEBUG   true    
 #define ENABLE_DATA_QUALITY     true    
 
-#define VERBOSE_PRINT_EVERY_N   10      
-#define RAW_UART_PRINT_EVERY_N  5       
-#define LCD_UPDATE_MS           250     
+#define VERBOSE_PRINT_EVERY_N           10
+#define RAW_UART_PRINT_EVERY_N          5
+#define LCD_UPDATE_MS                   250
+#define DATA_QUALITY_REPORT_INTERVAL_MS 30000   // 30 seconds
+#define LOADING_FLASH_INTERVAL_MS       500     // Loading screen flash rate
+#define UART_READ_TIMEOUT_MS            100     // UART read timeout
+#define MAX_IDENTICAL_READINGS_ALERT    50      // ~5 seconds at 100ms loop     
 
 // ============================================================================
 // TIMING CONFIGURATION
 // ============================================================================
 
-#define LOOP_DELAY_MS           100     
-#define ERROR_BLINK_MS          200     
-#define SENSOR_STARTUP_DELAY_MS 2000    
+#define LOOP_DELAY_MS           100
+#define ERROR_BLINK_MS          200
+#define SENSOR_STARTUP_DELAY_MS 2000
+#define MILLIS_SANITY_CHECK_MS  4000    // Sanity check for millis() overflow    
 
 // ============================================================================
 // ADVANCED OPTIONS
@@ -120,6 +126,13 @@ struct DataQuality {
     unsigned long lastReportTime;
 };
 
+struct SensorHealthMonitor {
+    uint32_t identicalReadings;
+    float lastRange;
+    uint32_t lastEnergy;
+    unsigned long lastChangeTime;
+};
+
 // State tracking variables
 DetectionState currentState = DetectionState::NO_TARGET;
 DetectionState previousState = DetectionState::NO_TARGET;
@@ -133,6 +146,9 @@ unsigned long lastMotionTime = 0;
 
 // Data quality tracking
 DataQuality dataQuality = {0, 0, 0, 0, 0, 0, 0};
+
+// Sensor health monitoring
+SensorHealthMonitor healthMonitor = {0, 0.0, 0, 0};
 
 // ============================================================================
 // FUNCTION PROTOTYPES
@@ -157,6 +173,7 @@ void printRawUART(void);
 void printDataQualityReport(void);
 void printBanner(void);
 void printSeparator(void);
+void checkSensorHealth(const SensorReading& reading);
 
 // ============================================================================
 // MAIN FUNCTIONS
@@ -177,6 +194,9 @@ void loop() {
 
     // Read sensor data
     SensorReading reading = readSensor();
+
+    // Check sensor health
+    checkSensorHealth(reading);
 
     // Evaluate detection with debouncing
     currentState = evaluateDetection(reading);
@@ -200,7 +220,7 @@ void loop() {
     // Print data quality report periodically
     if (ENABLE_DATA_QUALITY) {
         unsigned long now = millis();
-        if (now - dataQuality.lastReportTime > 30000) { 
+        if (now - dataQuality.lastReportTime > DATA_QUALITY_REPORT_INTERVAL_MS) {
             printDataQualityReport();
             dataQuality.lastReportTime = now;
         }
@@ -269,8 +289,8 @@ void performStartupBuffer(void) {
         unsigned long elapsed = millis() - startBuffer;
         int percentage = (elapsed * 100) / STARTUP_BUFFER_MS;
 
-        // Flash "LOADING..." logic (every 500ms)
-        if (millis() - lastFlash > 500) {
+        // Flash "LOADING..." logic
+        if (millis() - lastFlash > LOADING_FLASH_INTERVAL_MS) {
             flashState = !flashState;
             lastFlash = millis();
             
@@ -434,7 +454,8 @@ SensorReading readSensor(void) {
     reading.targetEnergy = radarSensor.getTargetEnergy();
 
     dataQuality.totalReadings++;
-    reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY);
+    reading.energyCorrupted = (reading.targetEnergy > MAX_VALID_ENERGY ||
+                              reading.targetEnergy < MIN_VALID_ENERGY);
     if (reading.energyCorrupted) dataQuality.corruptedEnergy++;
 
     // Range Check
@@ -481,11 +502,13 @@ bool verifyDetectionUART(void) {
 }
 
 DetectionState evaluateDetection(const SensorReading& reading) {
-    
+
     unsigned long timeSinceDetection = millis() - lastDetectionTime;
-    
-    // --- LATCH ACTIVE PHASE ---
-    if (timeSinceDetection < DETECTION_LATCH_MS) {
+
+    // --- LATCH ACTIVE PHASE (with millis() overflow protection) ---
+    bool latchActive = (timeSinceDetection < DETECTION_LATCH_MS) &&
+                       (timeSinceDetection < MILLIS_SANITY_CHECK_MS);
+    if (latchActive) {
         return DetectionState::DETECTED;
     }
 
@@ -537,9 +560,10 @@ void updateLCD(const SensorReading& reading, DetectionState state) {
     
     bool rawMotion = digitalRead(PIN_MOTION_INPUT);
     if (rawMotion == HIGH) lastMotionTime = millis();
-    
+
     bool isHumanActive = (state == DetectionState::DETECTED);
-    bool isMotionActive = (millis() - lastMotionTime < 3000); 
+    unsigned long timeSinceMotion = millis() - lastMotionTime;
+    bool isMotionActive = (timeSinceMotion < 3000) && (timeSinceMotion < MILLIS_SANITY_CHECK_MS); 
 
     bool timeToUpdateText = (millis() - lastLcdUpdate > LCD_UPDATE_MS);
 
@@ -613,7 +637,7 @@ void errorBlinkLED(void) {
 void printBanner(void) {
     Serial.println();
     Serial.println(F("╔════════════════════════════════════════╗"));
-    Serial.println(F("║   mmWave Presence - Pulse Mode v2.8.1  ║"));
+    Serial.println(F("║   mmWave Presence - Pulse Mode v2.9.0  ║"));
     Serial.println(F("║      with Gravity LCD1602 RGB          ║"));
     Serial.println(F("╚════════════════════════════════════════╝"));
     Serial.println();
@@ -646,7 +670,8 @@ void printVerboseStatus(const SensorReading& reading, DetectionState state) {
     if (state == DetectionState::DETECTED) {
         unsigned long timeSinceDetection = millis() - lastDetectionTime;
         unsigned long latchRemaining = 0;
-        if (timeSinceDetection < DETECTION_LATCH_MS) {
+        if (timeSinceDetection < DETECTION_LATCH_MS &&
+            timeSinceDetection < MILLIS_SANITY_CHECK_MS) {
             latchRemaining = (DETECTION_LATCH_MS - timeSinceDetection) / 1000;
         }
         Serial.print(F("[LATCHED: "));
@@ -661,7 +686,7 @@ void printRawUART(void) {
     if (Serial1.available()) {
         String message = "";
         unsigned long startTime = millis();
-        while (Serial1.available() && (millis() - startTime < 100)) {
+        while (Serial1.available() && (millis() - startTime < UART_READ_TIMEOUT_MS)) {
             char c = Serial1.read();
             if (isPrintable(c) && c != '\r' && c != '\n') message += c;
             if (c == '*' || c == '\n' || c == '\r') {
@@ -680,6 +705,26 @@ void printRawUART(void) {
             Serial.print(F("RAW: "));
             Serial.println(message);
         }
+    }
+}
+
+void checkSensorHealth(const SensorReading& reading) {
+    // Detect stuck readings
+    if (reading.targetRange == healthMonitor.lastRange &&
+        reading.targetEnergy == healthMonitor.lastEnergy &&
+        reading.targetCount > 0) {
+        healthMonitor.identicalReadings++;
+
+        if (healthMonitor.identicalReadings > MAX_IDENTICAL_READINGS_ALERT) {
+            Serial.println(F("⚠️  WARNING: Sensor may be stuck!"));
+            lcd.setRGB(255, 165, 0);  // Orange warning
+            // Optional: Attempt sensor reset
+            // radarSensor.setSensor(eStartSen);
+        }
+    } else {
+        healthMonitor.identicalReadings = 0;
+        healthMonitor.lastRange = reading.targetRange;
+        healthMonitor.lastEnergy = reading.targetEnergy;
     }
 }
 
