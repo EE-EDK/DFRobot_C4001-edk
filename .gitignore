@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+*.o
+*.elf
+*.bin
+*.hex
+
+# Arduino build
+.build/
+*.d
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Doxygen output (large, regenerable)
+# examples/DFRobot-C4001-24GHz-UART-Enhanced-PiPico/Doxygen Documentation/html/
+
+# Claude Code
+.claude/
