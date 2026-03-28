@@ -32,3 +32,6 @@ Extends the root `ENGINEERING-PROJECTS/GEMINI.md`. This file defines project-spe
 | `library.properties` | Arduino library metadata |
 | `Doxyfile` | Documentation generation config |
 | `README.md` | Full documentation with wiring, config, troubleshooting |
+
+## TODO
+- [ ] None identified

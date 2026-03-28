@@ -1,0 +1,5 @@
+<map id="initializeSensor" name="initializeSensor">
+<area shape="rect" id="Node000001" title="Establishes communication with the C4001 mmWave sensor." alt="" coords="5,5,115,32"/>
+<area shape="rect" id="Node000002" href="$C4001__PresenceDetector__Enhanced_8ino.html#a960c58e545f44c47776b31c4842c4a79" title="Blinks LED rapidly to indicate fatal error condition." alt="" coords="163,5,265,32"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="115,16,147,16,147,21,115,21"/>
+</map>

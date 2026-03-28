@@ -1,0 +1,7 @@
+<map id="showConfigSummary" name="showConfigSummary">
+<area shape="rect" id="Node000001" title="Displays comprehensive system configuration table." alt="" coords="268,5,414,32"/>
+<area shape="rect" id="Node000002" href="$C4001__PresenceDetector__Enhanced_8ino.html#a19ebe9f470610e6867c7f4724aa5da9b" title="Initializes the complete system including hardware, sensor, and timing." alt="" coords="107,5,220,32"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="253,21,220,21,220,16,253,16"/>
+<area shape="rect" id="Node000003" href="$C4001__PresenceDetector__Enhanced_8ino.html#a4fc01d736fe50cf5b977f755b675f11d" title="Arduino setup function &#45; called once at startup." alt="" coords="5,5,59,32"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="91,21,59,21,59,16,91,16"/>
+</map>

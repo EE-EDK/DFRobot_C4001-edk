@@ -49,3 +49,12 @@ This is an **Arduino library project**, not a CMake project.
 - Fork of upstream `DFRobot/DFRobot_C4001`
 - Remotes: `origin` (user fork), `upstream` (DFRobot official)
 - Branch has diverged from origin/main — may need pull/rebase before push
+
+## TODO
+- [ ] Arduino `.ino` format (C++ with Arduino framework)
+- [ ] All config parameters as `#define` at top of `.ino` file
+- [ ] Doxygen-style comments (`@brief`, `@param`, `@return`)
+- [ ] Uses Speed Mode as workaround (Presence Mode has known sensor firmware bugs)
+- [ ] Fork of upstream `DFRobot/DFRobot_C4001`
+- [ ] Remotes: `origin` (user fork), `upstream` (DFRobot official)
+- [ ] Branch has diverged from origin/main — may need pull/rebase before push

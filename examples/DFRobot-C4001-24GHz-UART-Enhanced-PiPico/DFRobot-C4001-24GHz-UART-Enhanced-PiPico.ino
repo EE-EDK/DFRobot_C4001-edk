@@ -38,8 +38,8 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // DETECTION RANGE & SPEED CONFIGURATION
 // ============================================================================
 
-#define MIN_DETECTION_RANGE_M   1.0     
-#define MAX_DETECTION_RANGE_M   10.0    
+#define MIN_DETECTION_RANGE_M   3.0     
+#define MAX_DETECTION_RANGE_M   5.0    
 
 // [Added] Speed Filter
 #define MAX_HUMAN_SPEED_MS      7.0     // Filter out targets moving faster than 7m/s

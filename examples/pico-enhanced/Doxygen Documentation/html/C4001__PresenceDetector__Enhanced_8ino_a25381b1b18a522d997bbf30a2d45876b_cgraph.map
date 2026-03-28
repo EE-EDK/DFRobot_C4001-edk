@@ -1,0 +1,5 @@
+<map id="evaluateDetection" name="evaluateDetection">
+<area shape="rect" id="Node000001" title="Evaluates sensor reading and applies debouncing logic." alt="" coords="5,5,132,32"/>
+<area shape="rect" id="Node000002" href="$C4001__PresenceDetector__Enhanced_8ino.html#ab2c97e57ef65c7179c9117548b03bc83" title="Performs additional UART verification reads to confirm detection." alt="" coords="180,5,325,32"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="132,16,164,16,164,21,132,21"/>
+</map>
