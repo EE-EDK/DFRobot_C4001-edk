@@ -58,3 +58,7 @@ This is an **Arduino library project**, not a CMake project.
 - [ ] Fork of upstream `DFRobot/DFRobot_C4001`
 - [ ] Remotes: `origin` (user fork), `upstream` (DFRobot official)
 - [ ] Branch has diverged from origin/main — may need pull/rebase before push
+
+## Conversation History Archive
+
+Past AI conversations (217 total) are archived at the workspace root: `.claude/conversation-history/`. Search `index.json` by keyword or browse `index.md` for topic-grouped context on prior decisions, approaches, and project history.
