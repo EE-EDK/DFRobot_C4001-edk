@@ -38,8 +38,8 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // DETECTION RANGE & SPEED CONFIGURATION
 // ============================================================================
 
-#define MIN_DETECTION_RANGE_M   3.0     
-#define MAX_DETECTION_RANGE_M   5.0    
+#define MIN_DETECTION_RANGE_M   2.0     
+#define MAX_DETECTION_RANGE_M   10.0    
 
 // [Added] Speed Filter
 #define MAX_HUMAN_SPEED_MS      7.0     // Filter out targets moving faster than 7m/s
@@ -51,8 +51,8 @@ DFRobot_RGBLCD1602 lcd(0x2D, 0x3E);
 // DETECTION BEHAVIOR CONFIGURATION
 // ============================================================================
 
-#define DETECTION_THRESHOLD     10      // Lower = more sensitive
-#define STABLE_READINGS         3       
+#define DETECTION_THRESHOLD     9      // Lower = more sensitive
+#define STABLE_READINGS         4       
 #define ENABLE_UART_VERIFY      true    
 #define UART_VERIFY_SAMPLES     2       
 
@@ -404,7 +404,7 @@ void createLCDCustomChars(void) {
         0b10001,
         0b00000
     };
-    lcd.createChar(0, humanIcon);
+    lcd.customSymbol(0, humanIcon);
 
     // Custom character 1: Wave/Motion icon
     byte waveIcon[8] = {
@@ -417,7 +417,7 @@ void createLCDCustomChars(void) {
         0b00100,
         0b00010
     };
-    lcd.createChar(1, waveIcon);
+    lcd.customSymbol(1, waveIcon);
 
     Serial.println(F("  ✓ Custom LCD characters created"));
 }
@@ -855,9 +855,7 @@ void checkSensorHealth(const SensorReading& reading) {
 }
 
 int getFreeRAM() {
-    extern int __heap_start, *__brkval;
-    int v;
-    return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+    return rp2040.getFreeHeap();
 }
 
 void updateSystemMetrics(void) {
